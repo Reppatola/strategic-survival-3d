@@ -127,7 +127,7 @@ export class Game {
         // --- Игрок ---
         this.player.update(dt, input, aimPoint, this.collision);
 
-        // --- Следы + звук шага (источник — сам игрок, distance = 0) ---
+        // --- Следы + звук шага ---
         if (this.player.didStep) {
             this.footprints.spawn(px, pz);
             const stepType = this.player.state === 'CROUCH' ? 'crouch'
@@ -136,22 +136,22 @@ export class Game {
             this.audio.playAt(`step_${stepType}`, px, pz, px, pz);
         }
 
-        // --- Стрельба (источник — игрок) ---
+        // --- Стрельба (свой импульс, source: 'player') ---
         if (this.player.didShoot) {
             this.bullets.spawn(
                 px, pz,
                 this.player._shotDir.dx,
                 this.player._shotDir.dz
             );
-            this.noise.addImpulse('shot', px, pz);
+            this.noise.addImpulse('shot', px, pz, 'player');
             this.muzzleFlash.trigger(this.player.position, this.player._shotDir);
             this.audio.playAt('shot', px, pz, px, pz);
         }
 
-        // --- Одноразовые действия → шум (позиционные) ---
-        if (this.player.didMelee) this.noise.addImpulse('melee', px, pz);
-        if (this.player.didGlass) this.noise.addImpulse('glass', px, pz);
-        if (this.player.didBoom)  this.noise.addImpulse('boom',  px, pz);
+        // --- Одноразовые действия → свои импульсы ---
+        if (this.player.didMelee) this.noise.addImpulse('melee', px, pz, 'player');
+        if (this.player.didGlass) this.noise.addImpulse('glass', px, pz, 'player');
+        if (this.player.didBoom)  this.noise.addImpulse('boom',  px, pz, 'player');
 
         this.bullets.update(dt, this.collision);
         this.footprints.update(dt);
@@ -161,6 +161,7 @@ export class Game {
         this.noise.update(dt, this.player.state, this.player.position);
 
         // --- Зомби ---
+        // Крикун добавляет 'scream' как source: 'world' из своего update()
         const damageToPlayer = this.spawner.update(
             dt,
             this.player.position,
@@ -174,9 +175,7 @@ export class Game {
             this.damageIndicator.flash();
         }
 
-        // --- Крики крикунов: звук из точки крикуна ---
-        // Zombie.update уже добавил позиционный импульс в noiseSystem.
-        // Здесь мы только озвучиваем это игроку.
+        // --- Озвучка криков крикунов (звук из точки крикуна) ---
         for (const z of this.spawner.zombies) {
             if (z.alive && z.didScream) {
                 this.audio.playAt('scream', z.position.x, z.position.z, px, pz);
@@ -191,8 +190,8 @@ export class Game {
         this.sun.target.position.copy(this.player.position);
         this.sun.target.updateMatrixWorld();
 
-        // --- Визуал шума ---
-        this.noiseRing.update(this.player.position, this.noise.total, this.player.dead);
+        // --- Визуал шума (только СВОЙ шум игрока) ---
+        this.noiseRing.update(this.player.position, this.noise.ownTotal, this.player.dead);
 
         // --- UI ---
         this.crosshair.update(this.player.position, aimPoint, this.player.dead);

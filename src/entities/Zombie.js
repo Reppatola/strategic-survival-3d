@@ -134,7 +134,7 @@ export class Zombie {
             // Крикун кричит ОТ СЕБЯ — позиционный источник шума
             if (this.type.scream && this._screamCooldown <= 0) {
                 this._screamCooldown = this.type.scream.cooldown;
-                noiseSystem.addImpulse('scream', this.position.x, this.position.z);
+                noiseSystem.addImpulse('scream', this.position.x, this.position.z, 'world');
                 this.didScream = true;
             }
         } else if (hearsPlayer) {

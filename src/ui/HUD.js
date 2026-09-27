@@ -42,18 +42,29 @@ export class HUD {
         const hpBar = '█'.repeat(filled) + '░'.repeat(10 - filled);
         const stateLabel = t(`hud.state.${player.state}`);
 
-        // --- HUD: разбор по источникам ---
+        // --- Свой шум: база + свои импульсы ---
         let lines = '';
         lines += `HP ${hpBar} ${player.hp.toFixed(0)}\n`;
-        lines += `dB ${noise.total.toFixed(1)}  ·  ${stateLabel}\n`;
+        lines += `dB ${noise.ownTotal.toFixed(1)}  ·  ${stateLabel}\n`;
         lines += `  база ${noise.base.toFixed(0)}\n`;
         for (const imp of noise.impulses) {
+            if (imp.source !== 'player') continue;
             lines += `  ${imp.name} ${imp.level.toFixed(0)}\n`;
+        }
+
+        // --- Мировой шум вокруг (если слышно) ---
+        const ambient = noise.ambientAtPlayer();
+        if (ambient > 20) {
+            lines += `вокруг ${ambient.toFixed(0)} dB\n`;
+            for (const imp of noise.impulses) {
+                if (imp.source === 'player') continue;
+                lines += `  ${imp.name} (${imp.source})\n`;
+            }
         }
 
         this.el.textContent = lines;
 
-        // Критический режим (теперь у noise, а не у alert)
+        // Критический режим — только от СВОЕГО шума
         if (noise.critical) {
             this.criticalEl.style.display = 'block';
             const tm = performance.now() * 0.005;
