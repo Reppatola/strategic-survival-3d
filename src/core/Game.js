@@ -51,7 +51,6 @@ export class Game {
         this.noise = new NoiseSystem();
         this.audio = new AudioSystem();
 
-        // Разблокировать звук при первом взаимодействии
         const unlockAudio = () => this.audio.unlock();
         window.addEventListener('pointerdown', unlockAudio, { once: true });
         window.addEventListener('keydown', unlockAudio, { once: true });
@@ -122,51 +121,46 @@ export class Game {
         const input = this.input.sample();
         const aimPoint = this.aim.update(input.mouseNDC);
 
+        const px = this.player.position.x;
+        const pz = this.player.position.z;
+
         // --- Игрок ---
         this.player.update(dt, input, aimPoint, this.collision);
 
-        // --- Следы + звук шага ---
+        // --- Следы + звук шага (источник — сам игрок, distance = 0) ---
         if (this.player.didStep) {
-            this.footprints.spawn(this.player.position.x, this.player.position.z);
-
+            this.footprints.spawn(px, pz);
             const stepType = this.player.state === 'CROUCH' ? 'crouch'
                            : this.player.state === 'SPRINT' ? 'sprint'
                            : 'walk';
-            this.audio.playStep(stepType);
+            this.audio.playAt(`step_${stepType}`, px, pz, px, pz);
         }
 
-        // --- Стрельба (позиционный импульс от игрока) ---
+        // --- Стрельба (источник — игрок) ---
         if (this.player.didShoot) {
             this.bullets.spawn(
-                this.player.position.x,
-                this.player.position.z,
+                px, pz,
                 this.player._shotDir.dx,
                 this.player._shotDir.dz
             );
-            this.noise.addImpulse('shot', this.player.position.x, this.player.position.z);
+            this.noise.addImpulse('shot', px, pz);
             this.muzzleFlash.trigger(this.player.position, this.player._shotDir);
-            this.audio.playShot();
+            this.audio.playAt('shot', px, pz, px, pz);
         }
 
         // --- Одноразовые действия → шум (позиционные) ---
-        if (this.player.didMelee) {
-            this.noise.addImpulse('melee', this.player.position.x, this.player.position.z);
-        }
-        if (this.player.didGlass) {
-            this.noise.addImpulse('glass', this.player.position.x, this.player.position.z);
-        }
-        if (this.player.didBoom) {
-            this.noise.addImpulse('boom', this.player.position.x, this.player.position.z);
-        }
+        if (this.player.didMelee) this.noise.addImpulse('melee', px, pz);
+        if (this.player.didGlass) this.noise.addImpulse('glass', px, pz);
+        if (this.player.didBoom)  this.noise.addImpulse('boom',  px, pz);
 
         this.bullets.update(dt, this.collision);
         this.footprints.update(dt);
         this.muzzleFlash.update(dt);
 
-        // --- Шум (со всеми аргументами: state + позиция игрока) ---
+        // --- Шум ---
         this.noise.update(dt, this.player.state, this.player.position);
 
-        // --- Зомби (крикун сам добавляет 'scream' со своей позиции) ---
+        // --- Зомби ---
         const damageToPlayer = this.spawner.update(
             dt,
             this.player.position,
@@ -180,11 +174,20 @@ export class Game {
             this.damageIndicator.flash();
         }
 
+        // --- Крики крикунов: звук из точки крикуна ---
+        // Zombie.update уже добавил позиционный импульс в noiseSystem.
+        // Здесь мы только озвучиваем это игроку.
+        for (const z of this.spawner.zombies) {
+            if (z.alive && z.didScream) {
+                this.audio.playAt('scream', z.position.x, z.position.z, px, pz);
+            }
+        }
+
         // --- Камера ---
         this.cameraRig.update(dt, this.player.position, aimPoint);
 
         // --- Солнце ---
-        this.sun.position.set(this.player.position.x + 35, 55, this.player.position.z + 20);
+        this.sun.position.set(px + 35, 55, pz + 20);
         this.sun.target.position.copy(this.player.position);
         this.sun.target.updateMatrixWorld();
 

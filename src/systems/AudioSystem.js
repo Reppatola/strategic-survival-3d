@@ -1,6 +1,5 @@
 // AudioSystem — синтезированные звуки через Web Audio API.
-// Не требует файлов: выстрел и шаги генерируются программно.
-// Позже легко заменить на реальные .mp3/.ogg, интерфейс не изменится.
+// Позиционные: громкость и панорамирование зависят от точки источника.
 import { AUDIO } from '../config/audio.config.js';
 
 export class AudioSystem {
@@ -10,8 +9,6 @@ export class AudioSystem {
         this.enabled = false;
     }
 
-    // Браузеры блокируют звук до первого взаимодействия пользователя.
-    // Вызывается один раз при первом клике или нажатии клавиши.
     unlock() {
         if (this.enabled) return;
         const AC = window.AudioContext || window.webkitAudioContext;
@@ -24,62 +21,112 @@ export class AudioSystem {
         this.enabled = true;
     }
 
-    // --- Выстрел из пистолета ---
-    playShot() {
+    setMasterVolume(v) {
+        AUDIO.masterVolume = Math.max(0, Math.min(1, v));
+        if (this.masterGain) this.masterGain.gain.value = AUDIO.masterVolume;
+    }
+
+    // --- Позиционная обёртка ---
+    // Считает attenuation и panning по расстоянию от слушателя (игрока).
+    // pan: -1 (лево) ... +1 (право)
+    _spatialParams(sx, sz, lx, lz) {
+        const dx = sx - lx;
+        const dz = sz - lz;
+        const dist = Math.hypot(dx, dz);
+        const volume = 1 / (1 + dist * AUDIO.falloffK);
+
+        // Панорама: относим X-смещение к общему расстоянию.
+        // (Игрок смотрит сверху; "право экрана" = +X для камеры сверху с up=Z+)
+        const pan = dist > 0.01
+            ? Math.max(-1, Math.min(1, dx / Math.max(dist, 10)))
+            : 0;
+
+        return { volume, pan };
+    }
+
+    // Создаёт цепочку gain → pan → master
+    _makeChain(volume, pan) {
+        const gain = this.ctx.createGain();
+        gain.gain.value = volume;
+
+        let lastNode = gain;
+        if (typeof this.ctx.createStereoPanner === 'function') {
+            const panner = this.ctx.createStereoPanner();
+            panner.pan.value = pan;
+            gain.connect(panner);
+            lastNode = panner;
+        }
+        lastNode.connect(this.masterGain);
+        return gain;
+    }
+
+    // --- Универсальный вызов по имени ---
+    // name: 'shot' | 'step_walk' | 'step_crouch' | 'step_sprint' | 'scream'
+    playAt(name, sx, sz, listenerX, listenerZ) {
         if (!this.enabled) return;
+        const { volume, pan } = this._spatialParams(sx, sz, listenerX, listenerZ);
+        if (volume < 0.005) return;
+
+        const chainGain = this._makeChain(volume, pan);
+
+        if (name === 'shot')        this._synthShot(chainGain);
+        else if (name === 'scream') this._synthScream(chainGain);
+        else if (name.startsWith('step_')) {
+            const sub = name.slice(5);
+            this._synthStep(chainGain, sub);
+        }
+    }
+
+    // --- Синтез выстрела ---
+    _synthShot(outGain) {
         const cfg = AUDIO.shot;
         const t = this.ctx.currentTime;
         const dur = cfg.duration;
 
-        // 1. Основной шум — белый шум с полосовым фильтром
-        const noise = this._createNoiseBuffer(dur);
+        // Шум
         const src = this.ctx.createBufferSource();
-        src.buffer = noise;
+        src.buffer = this._createNoiseBuffer(dur);
 
         const bandpass = this.ctx.createBiquadFilter();
         bandpass.type = 'bandpass';
         bandpass.frequency.value = 1200;
         bandpass.Q.value = 0.8;
 
-        const noiseGain = this.ctx.createGain();
-        noiseGain.gain.setValueAtTime(cfg.volume, t);
-        noiseGain.gain.exponentialRampToValueAtTime(0.001, t + dur);
+        const nGain = this.ctx.createGain();
+        nGain.gain.setValueAtTime(cfg.volume, t);
+        nGain.gain.exponentialRampToValueAtTime(0.001, t + dur);
 
         src.connect(bandpass);
-        bandpass.connect(noiseGain);
-        noiseGain.connect(this.masterGain);
+        bandpass.connect(nGain);
+        nGain.connect(outGain);
         src.start(t);
         src.stop(t + dur);
 
-        // 2. Низкочастотный «thump» для веса — синус 120 → 40 Hz
+        // Низкочастотный thump
         const osc = this.ctx.createOscillator();
         osc.type = 'sine';
         osc.frequency.setValueAtTime(120, t);
         osc.frequency.exponentialRampToValueAtTime(40, t + 0.1);
 
-        const oscGain = this.ctx.createGain();
-        oscGain.gain.setValueAtTime(cfg.thump, t);
-        oscGain.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+        const oGain = this.ctx.createGain();
+        oGain.gain.setValueAtTime(cfg.thump, t);
+        oGain.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
 
-        osc.connect(oscGain);
-        oscGain.connect(this.masterGain);
+        osc.connect(oGain);
+        oGain.connect(outGain);
         osc.start(t);
         osc.stop(t + 0.1);
     }
 
-    // --- Шаг ---
-    // type: 'crouch' | 'walk' | 'sprint'
-    playStep(type = 'walk') {
-        if (!this.enabled) return;
+    // --- Синтез шага ---
+    _synthStep(outGain, type = 'walk') {
         const cfg = AUDIO.step[type] || AUDIO.step.walk;
         const t = this.ctx.currentTime;
         const dur = cfg.duration;
 
-        const noise = this._createNoiseBuffer(dur);
         const src = this.ctx.createBufferSource();
-        src.buffer = noise;
+        src.buffer = this._createNoiseBuffer(dur);
 
-        // Lowpass — глубина шага зависит от режима
         const filter = this.ctx.createBiquadFilter();
         filter.type = 'lowpass';
         filter.frequency.value = cfg.filter;
@@ -90,28 +137,81 @@ export class AudioSystem {
 
         src.connect(filter);
         filter.connect(gain);
-        gain.connect(this.masterGain);
+        gain.connect(outGain);
         src.start(t);
         src.stop(t + dur);
     }
 
-    // --- Утилита: белый шум нужной длины ---
+    // --- Синтез крика крикуна ---
+    // Протяжный вопль: пила с вибрато + шумовая подложка.
+    _synthScream(outGain) {
+        const cfg = AUDIO.scream;
+        const t = this.ctx.currentTime;
+        const dur = cfg.duration;
+
+        // 1. Основной тон — пилообразный, с вибрато и скольжением вверх-вниз
+        const osc = this.ctx.createOscillator();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(cfg.carrierFreq * 0.8, t);
+        osc.frequency.linearRampToValueAtTime(cfg.carrierFreq * 1.3, t + dur * 0.3);
+        osc.frequency.linearRampToValueAtTime(cfg.carrierFreq * 0.7, t + dur);
+
+        // Vibrato через LFO
+        const lfo = this.ctx.createOscillator();
+        lfo.type = 'sine';
+        lfo.frequency.value = cfg.vibratoFreq;
+        const lfoGain = this.ctx.createGain();
+        lfoGain.gain.value = cfg.vibratoDepth;
+        lfo.connect(lfoGain);
+        lfoGain.connect(osc.frequency);
+
+        // 2. Общая огибающая громкости — быстро вверх, долго держится, спад
+        const voiceGain = this.ctx.createGain();
+        voiceGain.gain.setValueAtTime(0.001, t);
+        voiceGain.gain.exponentialRampToValueAtTime(cfg.volume, t + 0.08);
+        voiceGain.gain.setValueAtTime(cfg.volume, t + dur * 0.7);
+        voiceGain.gain.exponentialRampToValueAtTime(0.001, t + dur);
+
+        // 3. Фильтр — убираем резкость высоких
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.value = 900;
+        filter.Q.value = 0.7;
+
+        osc.connect(filter);
+        filter.connect(voiceGain);
+        voiceGain.connect(outGain);
+
+        osc.start(t);
+        osc.stop(t + dur);
+        lfo.start(t);
+        lfo.stop(t + dur);
+
+        // 4. Шумовая подложка для «дыхания»
+        const noise = this.ctx.createBufferSource();
+        noise.buffer = this._createNoiseBuffer(dur);
+        const nf = this.ctx.createBiquadFilter();
+        nf.type = 'bandpass';
+        nf.frequency.value = 1400;
+        nf.Q.value = 1.2;
+        const nGain = this.ctx.createGain();
+        nGain.gain.setValueAtTime(0, t);
+        nGain.gain.linearRampToValueAtTime(cfg.volume * 0.35, t + 0.1);
+        nGain.gain.exponentialRampToValueAtTime(0.001, t + dur);
+
+        noise.connect(nf);
+        nf.connect(nGain);
+        nGain.connect(outGain);
+        noise.start(t);
+        noise.stop(t + dur);
+    }
+
     _createNoiseBuffer(duration) {
         const sampleRate = this.ctx.sampleRate;
         const length = Math.floor(sampleRate * duration);
         const buffer = this.ctx.createBuffer(1, length, sampleRate);
         const data = buffer.getChannelData(0);
-        for (let i = 0; i < length; i++) {
-            data[i] = Math.random() * 2 - 1;
-        }
+        for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;
         return buffer;
-    }
-
-    // --- Ручная громкость (пригодится для меню) ---
-    setMasterVolume(v) {
-        AUDIO.masterVolume = Math.max(0, Math.min(1, v));
-        if (this.masterGain) {
-            this.masterGain.gain.value = AUDIO.masterVolume;
-        }
     }
 }
