@@ -1,5 +1,5 @@
-// Пока простой: спавнит N зомби в случайных точках вокруг игрока.
-// Позже: волны, лимиты, реакция на шум.
+// Спавнит зомби и обновляет их каждый кадр.
+// Возвращает суммарный урон, нанесённый игроку за кадр.
 import { Zombie } from '../entities/Zombie.js';
 
 export class SpawnSystem {
@@ -24,7 +24,9 @@ export class SpawnSystem {
         }
     }
 
-    update(dt, targetPos, collision, bullets) {
+    update(dt, playerPos, noiseLevel, playerDead, collision, bullets) {
+        let damageToPlayer = 0;
+
         for (const z of this.zombies) {
             if (!z.alive) continue;
 
@@ -40,7 +42,10 @@ export class SpawnSystem {
                 }
             }
 
-            z.update(dt, targetPos, collision);
+            const dmg = z.update(dt, playerPos, noiseLevel, playerDead, collision);
+            damageToPlayer += dmg;
         }
+
+        return damageToPlayer;
     }
 }

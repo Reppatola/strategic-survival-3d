@@ -1,8 +1,11 @@
-// Простой враг: идёт к цели (пока — к игроку).
-// Позже добавим конусы обзора, состояния, реакции на шум.
+// Зомби: идёт к последней громкой точке, атакует игрока вблизи.
 import * as THREE from 'three';
 
-const SPEED = 3.5;
+const SPEED = 3.2;
+const ATTACK_RANGE = 1.4;
+const ATTACK_DAMAGE = 10;
+const ATTACK_COOLDOWN = 1.0;
+const HEAR_THRESHOLD = 45;
 
 export class Zombie {
     constructor(x, z) {
@@ -11,7 +14,16 @@ export class Zombie {
         this.position.set(x, 0, z);
 
         this.alive = true;
+        this.attackCooldown = 0;
 
+        // Последняя услышанная громкая точка
+        this.targetPos = new THREE.Vector3(x, 0, z);
+        this.hasTarget = false;
+
+        this._buildModel();
+    }
+
+    _buildModel() {
         const body = new THREE.Mesh(
             new THREE.CapsuleGeometry(0.4, 0.8, 6, 12),
             new THREE.MeshStandardMaterial({ color: 0x6a9a4b, flatShading: true })
@@ -29,21 +41,54 @@ export class Zombie {
         this.mesh.add(body, head);
     }
 
-    update(dt, targetPos, collision) {
-        if (!this.alive) return;
+    // Возвращает урон, который зомби нанёс игроку за этот кадр (обычно 0)
+    update(dt, playerPos, noiseLevel, playerDead, collision) {
+        if (!this.alive) return 0;
 
-        const dx = targetPos.x - this.position.x;
-        const dz = targetPos.z - this.position.z;
-        const len = Math.hypot(dx, dz);
-        if (len < 0.01) return;
+        this.attackCooldown = Math.max(0, this.attackCooldown - dt);
 
-        const nx = this.position.x + (dx / len) * SPEED * dt;
-        const nz = this.position.z + (dz / len) * SPEED * dt;
+        // --- Слух ---
+        if (noiseLevel > HEAR_THRESHOLD) {
+            const jitter = THREE.MathUtils.mapLinear(
+                noiseLevel, HEAR_THRESHOLD, 110, 10, 2
+            );
+            this.targetPos.set(
+                playerPos.x + (Math.random() - 0.5) * jitter,
+                0,
+                playerPos.z + (Math.random() - 0.5) * jitter
+            );
+            this.hasTarget = true;
+        }
 
-        collision.move(this.position, nx, nz);
+        // --- Движение к цели ---
+        if (this.hasTarget) {
+            const dx = this.targetPos.x - this.position.x;
+            const dz = this.targetPos.z - this.position.z;
+            const len = Math.hypot(dx, dz);
 
-        // Смотрим на цель
-        this.mesh.rotation.y = Math.atan2(dx, dz);
+            if (len > 0.5) {
+                const nx = this.position.x + (dx / len) * SPEED * dt;
+                const nz = this.position.z + (dz / len) * SPEED * dt;
+                collision.move(this.position, nx, nz);
+                this.mesh.rotation.y = Math.atan2(dx, dz);
+            } else {
+                this.hasTarget = false;
+            }
+        }
+
+        // --- Атака ---
+        if (!playerDead) {
+            const dpx = playerPos.x - this.position.x;
+            const dpz = playerPos.z - this.position.z;
+            const dist = Math.hypot(dpx, dpz);
+
+            if (dist < ATTACK_RANGE && this.attackCooldown <= 0) {
+                this.attackCooldown = ATTACK_COOLDOWN;
+                return ATTACK_DAMAGE;
+            }
+        }
+
+        return 0;
     }
 
     die() {
