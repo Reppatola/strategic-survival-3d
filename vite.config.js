@@ -1,5 +1,0 @@
-import { defineConfig } from 'vite';
-
-export default defineConfig({
-  base: '/strategic-survival-3d/',
-});
