@@ -1,5 +1,8 @@
 // Спавнит зомби разных типов, обновляет их, возвращает урон игроку.
+// Крикун сам добавляет импульс 'scream' со своей позиции (см. Zombie.update).
+import * as THREE from 'three';
 import { Zombie } from '../entities/Zombie.js';
+import { GAME } from '../config/game.config.js';
 
 export class SpawnSystem {
     constructor(scene, collision) {
@@ -9,6 +12,10 @@ export class SpawnSystem {
     }
 
     spawnOne(x, z, typeKey) {
+        // Клампим к границам мира
+        x = THREE.MathUtils.clamp(x, -GAME.worldHalf + 5, GAME.worldHalf - 5);
+        z = THREE.MathUtils.clamp(z, -GAME.worldHalf + 5, GAME.worldHalf - 5);
+
         if (this.collision.isBlocked(x, z)) return null;
         const z0 = new Zombie(x, z, typeKey);
         this.scene.add(z0.mesh);
@@ -20,11 +27,14 @@ export class SpawnSystem {
         for (let i = 0; i < count; i++) {
             const a = Math.random() * Math.PI * 2;
             const r = minR + Math.random() * (maxR - minR);
-            this.spawnOne(centerPos.x + Math.cos(a) * r, centerPos.z + Math.sin(a) * r, typeKey);
+            this.spawnOne(
+                centerPos.x + Math.cos(a) * r,
+                centerPos.z + Math.sin(a) * r,
+                typeKey
+            );
         }
     }
 
-    // Смешанный спавн: walker'ы + по одному каждого спеца
     spawnMixed(centerPos) {
         this.spawnRing(centerPos, 6, 40, 80, 'walker');
         this.spawnRing(centerPos, 1, 50, 70, 'sniffer');
@@ -48,11 +58,6 @@ export class SpawnSystem {
                     z.die();
                     break;
                 }
-            }
-
-            // Крик крикуна — глобальный шум через noiseSystem
-            if (z.didScream) {
-                noiseSystem.addImpulse('scream');
             }
 
             const dmg = z.update(dt, playerPos, noiseSystem, playerDead, collision);

@@ -1,5 +1,6 @@
 // Зомби с системой восприятия: слух + зрение + нюх.
-// Поведение — простой state machine: IDLE, SEARCH, CHASE, ATTACK.
+// Позиционный слух: спрашивает уровень шума в СВОЕЙ точке.
+// Whiskers для обхода углов при движении.
 import * as THREE from 'three';
 import { ZOMBIE_TYPES, ZOMBIE } from '../config/zombie.config.js';
 
@@ -16,13 +17,14 @@ export class Zombie {
         this.hp = this.type.hp;
         this.attackCooldown = 0;
 
-        // --- Состояние AI ---
-        this.state = 'IDLE';                       // IDLE | SEARCH | CHASE | ATTACK
+        // AI
+        this.state = 'IDLE';
         this.lastKnownPos = new THREE.Vector3(x, 0, z);
         this._hearingConfidence = 0;
         this._timeSinceSignal = 999;
         this._screamCooldown = 0;
         this.didScream = false;
+        this.lastHeardLevel = 0;
 
         this._buildModel();
     }
@@ -47,14 +49,14 @@ export class Zombie {
 
     // ---------- СЕНСОРЫ ----------
 
-    // Слух: накапливает уверенность, пока слышно.
-    // Возвращает true, если уверенность превысила порог.
-    _senseHearing(dt, playerPos, noiseSystem) {
-        const d = Math.hypot(playerPos.x - this.position.x, playerPos.z - this.position.z);
-        const heard = noiseSystem.levelAt(d);
+    _senseHearing(dt, noiseSystem) {
+        const heard = noiseSystem.levelAtPoint(this.position.x, this.position.z);
+        this.lastHeardLevel = heard;
 
         if (heard > ZOMBIE.hearingThreshold) {
-            const rate = (heard - ZOMBIE.hearingThreshold) / 30 * this.type.hearing.sensitivity;
+            const rate = (heard - ZOMBIE.hearingThreshold) / 30
+                       * this.type.hearing.sensitivity
+                       * ZOMBIE.confidenceGain;
             this._hearingConfidence += rate * dt;
         } else {
             this._hearingConfidence -= ZOMBIE.confidenceDecay * dt;
@@ -64,34 +66,25 @@ export class Zombie {
         return this._hearingConfidence >= ZOMBIE.confidenceTrigger;
     }
 
-    // Зрение: конус + проверка перекрытия стен.
     _senseVision(playerPos, collision) {
         const v = this.type.vision;
         const dx = playerPos.x - this.position.x;
         const dz = playerPos.z - this.position.z;
         const dist = Math.hypot(dx, dz);
-
         if (dist > v.range) return false;
 
-        // Направление взгляда — куда смотрит меш (rotation.y)
         const lookX = Math.sin(this.mesh.rotation.y);
         const lookZ = Math.cos(this.mesh.rotation.y);
-
-        // Косинус угла между взглядом и направлением на игрока
         const dot = (lookX * dx + lookZ * dz) / (dist || 1);
         const angle = Math.acos(THREE.MathUtils.clamp(dot, -1, 1)) * 180 / Math.PI;
-
         if (angle > v.angle / 2) return false;
 
-        // Проверка перекрытия зданием
         if (collision.lineBlocked(this.position.x, this.position.z, playerPos.x, playerPos.z)) {
             return false;
         }
-
         return true;
     }
 
-    // Нюх: направленный, постоянный. Не требует накопления.
     _senseSmell(playerPos) {
         const s = this.type.smell;
         if (s.range <= 0) return false;
@@ -99,14 +92,12 @@ export class Zombie {
         const dx = playerPos.x - this.position.x;
         const dz = playerPos.z - this.position.z;
         const dist = Math.hypot(dx, dz);
-
         if (dist > s.range) return false;
 
         const lookX = Math.sin(this.mesh.rotation.y);
         const lookZ = Math.cos(this.mesh.rotation.y);
         const dot = (lookX * dx + lookZ * dz) / (dist || 1);
         const angle = Math.acos(THREE.MathUtils.clamp(dot, -1, 1)) * 180 / Math.PI;
-
         return angle <= s.angle / 2;
     }
 
@@ -129,9 +120,9 @@ export class Zombie {
             playerPos.z - this.position.z
         );
 
-        // --- Собираем сигналы ---
+        // --- Сенсоры ---
         const seesPlayer = this._senseVision(playerPos, collision);
-        const hearsPlayer = this._senseHearing(dt, playerPos, noiseSystem);
+        const hearsPlayer = this._senseHearing(dt, noiseSystem);
         const smellsPlayer = this._senseSmell(playerPos);
 
         // --- Логика переходов ---
@@ -140,9 +131,10 @@ export class Zombie {
             this.lastKnownPos.set(playerPos.x, 0, playerPos.z);
             this._timeSinceSignal = 0;
 
-            // Крикун кричит при виде игрока
+            // Крикун кричит ОТ СЕБЯ — позиционный источник шума
             if (this.type.scream && this._screamCooldown <= 0) {
                 this._screamCooldown = this.type.scream.cooldown;
+                noiseSystem.addImpulse('scream', this.position.x, this.position.z);
                 this.didScream = true;
             }
         } else if (hearsPlayer) {
@@ -151,7 +143,6 @@ export class Zombie {
             this._timeSinceSignal = 0;
         } else if (smellsPlayer) {
             if (this.state === 'IDLE') this.state = 'SEARCH';
-            // Нюх — менее точный, поэтому с разбросом
             this.lastKnownPos.set(
                 playerPos.x + (Math.random() - 0.5) * 8,
                 0,
@@ -162,7 +153,6 @@ export class Zombie {
             this._timeSinceSignal += dt;
         }
 
-        // Если долго нет сигналов — успокаиваемся
         if (this.state === 'SEARCH' && this._timeSinceSignal > ZOMBIE.searchTimeout) {
             this.state = 'IDLE';
         }
@@ -171,7 +161,6 @@ export class Zombie {
         if (this.state === 'CHASE') {
             this._moveTowards(playerPos.x, playerPos.z, dt, collision);
 
-            // Если совсем близко — атакуем
             if (distToPlayer < ZOMBIE.attackRange && this.attackCooldown <= 0) {
                 this.attackCooldown = ZOMBIE.attackCooldown;
                 return ZOMBIE.attackDamage;
@@ -182,24 +171,38 @@ export class Zombie {
                 this.lastKnownPos.x - this.position.x,
                 this.lastKnownPos.z - this.position.z
             );
-            if (d < ZOMBIE.arrivalDist) {
-                this.state = 'IDLE';
-            }
+            if (d < ZOMBIE.arrivalDist) this.state = 'IDLE';
         }
 
         return 0;
     }
 
+    // --- Движение с whiskers: если прямой шаг заблокирован, ---
+    // --- пробуем повернуть на ±60° и ±120° ---
     _moveTowards(tx, tz, dt, collision) {
         const dx = tx - this.position.x;
         const dz = tz - this.position.z;
         const len = Math.hypot(dx, dz);
         if (len < 0.01) return;
 
-        const nx = this.position.x + (dx / len) * this.type.speed * dt;
-        const nz = this.position.z + (dz / len) * this.type.speed * dt;
-        collision.move(this.position, nx, nz);
-        this.mesh.rotation.y = Math.atan2(dx, dz);
+        const ux = dx / len, uz = dz / len;
+
+        if (this._tryStep(ux, uz, dt, collision)) return;
+
+        for (const a of [1.05, -1.05, 2.09, -2.09]) {  // 60°, -60°, 120°, -120°
+            const c = Math.cos(a), s = Math.sin(a);
+            const rx = ux * c - uz * s;
+            const rz = ux * s + uz * c;
+            if (this._tryStep(rx, rz, dt, collision)) return;
+        }
+    }
+
+    _tryStep(ux, uz, dt, collision) {
+        const nx = this.position.x + ux * this.type.speed * dt;
+        const nz = this.position.z + uz * this.type.speed * dt;
+        const moved = collision.move(this.position, nx, nz);
+        if (moved) this.mesh.rotation.y = Math.atan2(ux, uz);
+        return moved;
     }
 
     die() {

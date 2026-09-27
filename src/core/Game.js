@@ -135,7 +135,7 @@ export class Game {
             this.audio.playStep(stepType);
         }
 
-        // --- Стрельба ---
+        // --- Стрельба (позиционный импульс от игрока) ---
         if (this.player.didShoot) {
             this.bullets.spawn(
                 this.player.position.x,
@@ -143,24 +143,30 @@ export class Game {
                 this.player._shotDir.dx,
                 this.player._shotDir.dz
             );
-            this.noise.addImpulse('shot');
+            this.noise.addImpulse('shot', this.player.position.x, this.player.position.z);
             this.muzzleFlash.trigger(this.player.position, this.player._shotDir);
             this.audio.playShot();
         }
 
-        // --- Одноразовые действия → шум ---
-        if (this.player.didMelee) this.noise.addImpulse('melee');
-        if (this.player.didGlass) this.noise.addImpulse('glass');
-        if (this.player.didBoom)  this.noise.addImpulse('boom');
+        // --- Одноразовые действия → шум (позиционные) ---
+        if (this.player.didMelee) {
+            this.noise.addImpulse('melee', this.player.position.x, this.player.position.z);
+        }
+        if (this.player.didGlass) {
+            this.noise.addImpulse('glass', this.player.position.x, this.player.position.z);
+        }
+        if (this.player.didBoom) {
+            this.noise.addImpulse('boom', this.player.position.x, this.player.position.z);
+        }
 
         this.bullets.update(dt, this.collision);
         this.footprints.update(dt);
         this.muzzleFlash.update(dt);
 
-        // --- Шум ---
-        this.noise.update(dt, this.player.state);
+        // --- Шум (со всеми аргументами: state + позиция игрока) ---
+        this.noise.update(dt, this.player.state, this.player.position);
 
-        // --- Зомби ---
+        // --- Зомби (крикун сам добавляет 'scream' со своей позиции) ---
         const damageToPlayer = this.spawner.update(
             dt,
             this.player.position,
