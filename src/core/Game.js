@@ -7,7 +7,10 @@ import { InputSystem } from '../systems/InputSystem.js';
 import { AimSystem } from '../systems/AimSystem.js';
 import { CollisionSystem } from '../systems/CollisionSystem.js';
 import { CameraRig } from '../systems/CameraRig.js';
+import { NoiseSystem } from '../systems/NoiseSystem.js';
 import { Player } from '../entities/Player.js';
+import { World } from '../world/World.js';
+import { HUD } from '../ui/HUD.js';
 
 export class Game {
     constructor(container) {
@@ -41,14 +44,18 @@ export class Game {
         this.aim = new AimSystem(this.camera);
         this.collision = new CollisionSystem();
         this.cameraRig = new CameraRig(this.camera);
+        this.noise = new NoiseSystem();
+
+        // --- Мир ---
+        // World наполняет сцену домами и деревьями и сам регистрирует коллизии
+        this.world = new World(this.scene, this.collision);
 
         // --- Игрок ---
         this.player = new Player();
         this.scene.add(this.player.mesh);
 
-        // Временные препятствия для проверки коллизии
-        this._addTempObstacle(-20, 0, 8, 8);
-        this._addTempObstacle(15, 15, 10, 6);
+        // --- UI ---
+        this.hud = new HUD();
 
         // --- Цикл ---
         this.loop = new Loop((dt, elapsed) => this._update(dt, elapsed));
@@ -73,7 +80,6 @@ export class Game {
         this.scene.add(sun);
         this.scene.add(sun.target);
 
-        // ВАЖНО: сохраняем ссылку — она нужна в _update()
         this.sun = sun;
     }
 
@@ -93,37 +99,37 @@ export class Game {
         this.scene.add(grid);
     }
 
-    _addTempObstacle(x, z, w, d) {
-        const box = new THREE.Mesh(
-            new THREE.BoxGeometry(w, 6, d),
-            new THREE.MeshStandardMaterial({ color: 0xd9b48f, flatShading: true })
-        );
-        box.position.set(x, 3, z);
-        box.castShadow = true;
-        box.receiveShadow = true;
-        this.scene.add(box);
-        this.collision.registerBox(x, z, w, d);
-    }
-
     _update(dt, elapsed) {
-        // 1. Снять ввод
+        // 1. Ввод
         const input = this.input.sample();
 
-        // 2. Прицел: экран → точка на земле
+        // 2. Прицел
         const aimPoint = this.aim.update(input.mouseNDC);
 
         // 3. Игрок
         this.player.update(dt, input, aimPoint, this.collision);
 
-        // 4. Камера
+        // 4. Стрельба → импульс шума
+        if (input.fire) {
+            this.noise.addImpulse();
+            input.fire = false; // ограничение в один импульс за кадр
+        }
+
+        // 5. Шум
+        this.noise.update(dt, this.player.state);
+
+        // 6. Камера
         this.cameraRig.update(dt, this.player.position, aimPoint);
 
-        // 5. Солнце следует за игроком
+        // 7. Солнце следует за игроком
         this.sun.position.set(this.player.position.x + 35, 55, this.player.position.z + 20);
         this.sun.target.position.copy(this.player.position);
         this.sun.target.updateMatrixWorld();
 
-        // 6. Рендер
+        // 8. HUD
+        this.hud.update(this.player, this.noise);
+
+        // 9. Рендер
         this.renderer.render(this.scene, this.camera);
     }
 
