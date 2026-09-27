@@ -12,21 +12,20 @@ import { SpawnSystem } from '../systems/SpawnSystem.js';
 import { AlertSystem } from '../systems/AlertSystem.js';
 import { Player } from '../entities/Player.js';
 import { BulletPool } from '../entities/BulletPool.js';
+import { FootprintPool } from '../entities/FootprintPool.js';
 import { World } from '../world/World.js';
 import { HUD } from '../ui/HUD.js';
+import { Crosshair } from '../ui/Crosshair.js';
 import { DamageIndicator } from '../ui/DamageIndicator.js';
 
 export class Game {
     constructor(container) {
-        // --- Рендер ---
         this.renderer = new Renderer(container);
 
-        // --- Сцена ---
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(GAME.background);
         this.scene.fog = new THREE.Fog(GAME.background, GAME.fogNear, GAME.fogFar);
 
-        // --- Камера ---
         this.camera = new THREE.PerspectiveCamera(
             CAMERA.fov,
             window.innerWidth / window.innerHeight,
@@ -39,7 +38,6 @@ export class Game {
             this.camera.updateProjectionMatrix();
         });
 
-        // --- Сцена: свет и земля ---
         this._setupLights();
         this._setupGround();
 
@@ -60,14 +58,15 @@ export class Game {
 
         // --- Пули и враги ---
         this.bullets = new BulletPool(this.scene);
+        this.footprints = new FootprintPool(this.scene);
         this.spawner = new SpawnSystem(this.scene, this.collision);
         this.spawner.spawnRing(this.player.position, 8, 40, 80);
 
         // --- UI ---
         this.hud = new HUD();
+        this.crosshair = new Crosshair(this.scene);
         this.damageIndicator = new DamageIndicator();
 
-        // --- Цикл ---
         this.loop = new Loop((dt, elapsed) => this._update(dt, elapsed));
     }
 
@@ -110,16 +109,18 @@ export class Game {
     }
 
     _update(dt, elapsed) {
-        // 1. Ввод
         const input = this.input.sample();
-
-        // 2. Прицел
         const aimPoint = this.aim.update(input.mouseNDC);
 
-        // 3. Игрок
+        // Игрок
         this.player.update(dt, input, aimPoint, this.collision);
 
-        // 4. Стрельба → пуля + импульс шума
+        // Следы шагов
+        if (this.player.didStep) {
+            this.footprints.spawn(this.player.position.x, this.player.position.z);
+        }
+
+        // Стрельба
         if (this.player.didShoot) {
             this.bullets.spawn(
                 this.player.position.x,
@@ -130,16 +131,12 @@ export class Game {
             this.noise.addImpulse();
         }
 
-        // 5. Пули
         this.bullets.update(dt, this.collision);
+        this.footprints.update(dt);
 
-        // 6. Шум
         this.noise.update(dt, this.player.state);
-
-        // 7. Тревога (читает свежий шум)
         this.alert.update(dt, this.noise.total);
 
-        // 8. Зомби → урон игроку
         const damageToPlayer = this.spawner.update(
             dt,
             this.player.position,
@@ -153,19 +150,17 @@ export class Game {
             this.damageIndicator.flash();
         }
 
-        // 9. Камера
         this.cameraRig.update(dt, this.player.position, aimPoint);
 
-        // 10. Солнце
         this.sun.position.set(this.player.position.x + 35, 55, this.player.position.z + 20);
         this.sun.target.position.copy(this.player.position);
         this.sun.target.updateMatrixWorld();
 
-        // 11. UI
+        this.crosshair.update(this.player.position, aimPoint, this.player.dead);
+
         this.damageIndicator.update(dt);
         this.hud.update(this.player, this.noise, this.alert);
 
-        // 12. Рендер
         this.renderer.render(this.scene, this.camera);
     }
 

@@ -1,7 +1,6 @@
-// Генерирует окружение: дома, деревья, коллизии.
+// Генерирует окружение: дома с крышами, деревья, коллизии.
 // Работает через InstancedMesh — рисует сотни объектов за один вызов.
 import * as THREE from 'three';
-import { GAME } from '../config/game.config.js';
 
 export class World {
     constructor(scene, collision) {
@@ -10,6 +9,7 @@ export class World {
 
         this._generateLayout();
         this._buildBuildings();
+        this._buildRoofs();
         this._buildTrees();
     }
 
@@ -31,9 +31,11 @@ export class World {
                     const w = 7 + Math.random() * 8;
                     const d = 7 + Math.random() * 8;
                     const h = 5 + Math.random() * Math.random() * 20;
-                    this.buildings.push({ x, z, w, d, h, c: palette[(Math.random() * palette.length) | 0] });
+                    const c = palette[(Math.random() * palette.length) | 0];
+                    // Цвет крыши — затемнённый цвет стены
+                    const roofColor = new THREE.Color(c).multiplyScalar(0.55).getHex();
 
-                    // Регистрируем коллизию дома
+                    this.buildings.push({ x, z, w, d, h, c, roofColor });
                     this.collision.registerBox(x, z, w, d);
                 } else if (r < 0.75) {
                     const n = 2 + (Math.random() * 3 | 0);
@@ -53,11 +55,11 @@ export class World {
         if (this.buildings.length === 0) return;
 
         const geo = new THREE.BoxGeometry(1, 1, 1);
-        geo.translate(0, 0.5, 0); // привязка к нижней грани
+        geo.translate(0, 0.5, 0);
 
         const mat = new THREE.MeshStandardMaterial({ roughness: 0.85, flatShading: true });
-
         const mesh = new THREE.InstancedMesh(geo, mat, this.buildings.length);
+
         const M = new THREE.Matrix4();
         const Q = new THREE.Quaternion();
         const P = new THREE.Vector3();
@@ -69,6 +71,55 @@ export class World {
             M.compose(P, Q, S);
             mesh.setMatrixAt(i, M);
             mesh.setColorAt(i, new THREE.Color(b.c));
+        });
+
+        mesh.castShadow = mesh.receiveShadow = true;
+        this.scene.add(mesh);
+    }
+
+    _buildRoofs() {
+        if (this.buildings.length === 0) return;
+
+        // Крыша — призма: два ската, сходящиеся на вершине.
+        // Создаём через кастомную BufferGeometry: 6 вершин (2 треугольника на скат × 2 ската).
+        const roofGeo = new THREE.BufferGeometry();
+
+        // Основание крыши — единичный квадрат 1×1, высота — 1
+        // Скаты сходятся по оси Z, конёк — вдоль оси X
+        const vertices = new Float32Array([
+            // Передний скат
+            -0.5, 0, 0.5,   0.5, 0, 0.5,   0, 1, 0,
+            // Задний скат
+            -0.5, 0, -0.5,  0, 1, 0,      0.5, 0, -0.5,
+            // Левый торец (треугольник)
+            -0.5, 0, -0.5,  -0.5, 0, 0.5, 0, 1, 0,
+            // Правый торец
+            0.5, 0, 0.5,    0.5, 0, -0.5, 0, 1, 0,
+        ]);
+
+        // Нормали — упрощённо через автоматический расчёт
+        roofGeo.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+        roofGeo.computeVertexNormals();
+
+        const mat = new THREE.MeshStandardMaterial({ roughness: 0.75, flatShading: true });
+        const mesh = new THREE.InstancedMesh(roofGeo, mat, this.buildings.length);
+
+        const M = new THREE.Matrix4();
+        const Q = new THREE.Quaternion();
+        const P = new THREE.Vector3();
+        const S = new THREE.Vector3();
+
+        this.buildings.forEach((b, i) => {
+            // Крыша чуть шире дома, чтобы её было видно сверху
+            const roofW = b.w + 1.2;
+            const roofH = 2.5 + b.h * 0.08; // высокие дома — повыше крыша
+            const roofD = b.d + 1.2;
+
+            P.set(b.x, b.h, b.z);
+            S.set(roofW, roofH, roofD);
+            M.compose(P, Q, S);
+            mesh.setMatrixAt(i, M);
+            mesh.setColorAt(i, new THREE.Color(b.roofColor));
         });
 
         mesh.castShadow = mesh.receiveShadow = true;

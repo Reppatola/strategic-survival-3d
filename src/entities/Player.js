@@ -1,4 +1,4 @@
-// Игрок: модель, движение по 8 направлениям, поворот, стрельба, HP.
+// Игрок: модель, движение по 8 направлениям, поворот, стрельба, HP, следы.
 import * as THREE from 'three';
 import { PLAYER } from '../config/player.config.js';
 import { GAME } from '../config/game.config.js';
@@ -23,6 +23,10 @@ export class Player {
         this.maxHp = 100;
         this.dead = false;
         this._invulnTimer = 0;
+
+        // Следы
+        this.didStep = false;
+        this._stepTimer = 0;
     }
 
     _buildModel() {
@@ -63,6 +67,7 @@ export class Player {
         if (this.dead) {
             this.state = 'DEAD';
             this.didShoot = false;
+            this.didStep = false;
             return;
         }
 
@@ -94,6 +99,19 @@ export class Player {
             this.state = input.crouch ? 'CROUCH' : input.sprint ? 'SPRINT' : 'WALK';
         } else {
             this.state = 'IDLE';
+        }
+
+        // --- Следы: спавним каждые N секунд при движении ---
+        this.didStep = false;
+        if (input.moving) {
+            this._stepTimer -= dt;
+            const interval = input.crouch ? 0.55 : input.sprint ? 0.22 : 0.36;
+            if (this._stepTimer <= 0) {
+                this.didStep = true;
+                this._stepTimer = interval;
+            }
+        } else {
+            this._stepTimer = 0;
         }
 
         // --- Стрельба ---
