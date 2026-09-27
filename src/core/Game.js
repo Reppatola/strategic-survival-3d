@@ -19,6 +19,7 @@ import { World } from '../world/World.js';
 import { HUD } from '../ui/HUD.js';
 import { Crosshair } from '../ui/Crosshair.js';
 import { DamageIndicator } from '../ui/DamageIndicator.js';
+import { SensorVisualizer } from '../debug/SensorVisualizer.js';
 
 export class Game {
     constructor(container) {
@@ -77,6 +78,9 @@ export class Game {
         this.crosshair = new Crosshair(this.scene);
         this.damageIndicator = new DamageIndicator();
 
+        // --- Debug ---
+        this.sensorVisualizer = new SensorVisualizer(this.scene);
+
         this.loop = new Loop((dt, elapsed) => this._update(dt, elapsed));
     }
 
@@ -124,6 +128,9 @@ export class Game {
         const px = this.player.position.x;
         const pz = this.player.position.z;
 
+        // --- Debug: переключение визуализации сенсоров ---
+        if (input.pressedV) this.sensorVisualizer.toggle();
+
         // --- Игрок ---
         this.player.update(dt, input, aimPoint, this.collision);
 
@@ -136,7 +143,7 @@ export class Game {
             this.audio.playAt(`step_${stepType}`, px, pz, px, pz);
         }
 
-        // --- Стрельба (свой импульс, source: 'player') ---
+        // --- Стрельба ---
         if (this.player.didShoot) {
             this.bullets.spawn(
                 px, pz,
@@ -148,7 +155,7 @@ export class Game {
             this.audio.playAt('shot', px, pz, px, pz);
         }
 
-        // --- Одноразовые действия → свои импульсы ---
+        // --- Одноразовые действия ---
         if (this.player.didMelee) this.noise.addImpulse('melee', px, pz, 'player');
         if (this.player.didGlass) this.noise.addImpulse('glass', px, pz, 'player');
         if (this.player.didBoom)  this.noise.addImpulse('boom',  px, pz, 'player');
@@ -161,7 +168,6 @@ export class Game {
         this.noise.update(dt, this.player.state, this.player.position);
 
         // --- Зомби ---
-        // Крикун добавляет 'scream' как source: 'world' из своего update()
         const damageToPlayer = this.spawner.update(
             dt,
             this.player.position,
@@ -175,12 +181,19 @@ export class Game {
             this.damageIndicator.flash();
         }
 
-        // --- Озвучка криков крикунов (звук из точки крикуна) ---
+        // --- Озвучка криков ---
         for (const z of this.spawner.zombies) {
             if (z.alive && z.didScream) {
                 this.audio.playAt('scream', z.position.x, z.position.z, px, pz);
             }
         }
+
+        // --- Debug: обновление сенсоров ---
+        this.sensorVisualizer.update(
+            this.spawner.zombies,
+            this.noise,
+            this.player.position
+        );
 
         // --- Камера ---
         this.cameraRig.update(dt, this.player.position, aimPoint);
@@ -190,7 +203,7 @@ export class Game {
         this.sun.target.position.copy(this.player.position);
         this.sun.target.updateMatrixWorld();
 
-        // --- Визуал шума (только СВОЙ шум игрока) ---
+        // --- Визуал шума ---
         this.noiseRing.update(this.player.position, this.noise.ownTotal, this.player.dead);
 
         // --- UI ---

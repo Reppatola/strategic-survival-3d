@@ -59,6 +59,10 @@ export class HUD {
             for (const imp of noise.impulses) {
                 if (imp.source === 'player') continue;
                 lines += `  ${imp.name} (${imp.source})\n`;
+                // Подсказка про debug
+                if (!player.dead) {
+                    lines += `\n[V] сенсоры зомби\n`;
+                }
             }
         }
 
