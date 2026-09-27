@@ -24,7 +24,8 @@ export class SpawnSystem {
         }
     }
 
-    update(dt, playerPos, noiseLevel, playerDead, collision, bullets) {
+    // noiseSystem — передаётся целиком, чтобы зомби могли спросить levelAt(distance)
+    update(dt, playerPos, noiseSystem, playerDead, collision, bullets) {
         let damageToPlayer = 0;
 
         for (const z of this.zombies) {
@@ -42,7 +43,7 @@ export class SpawnSystem {
                 }
             }
 
-            const dmg = z.update(dt, playerPos, noiseLevel, playerDead, collision);
+            const dmg = z.update(dt, playerPos, noiseSystem, playerDead, collision);
             damageToPlayer += dmg;
         }
 
