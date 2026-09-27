@@ -9,6 +9,7 @@ import { CollisionSystem } from '../systems/CollisionSystem.js';
 import { CameraRig } from '../systems/CameraRig.js';
 import { NoiseSystem } from '../systems/NoiseSystem.js';
 import { SpawnSystem } from '../systems/SpawnSystem.js';
+import { AudioSystem } from '../systems/AudioSystem.js';
 import { Player } from '../entities/Player.js';
 import { BulletPool } from '../entities/BulletPool.js';
 import { FootprintPool } from '../entities/FootprintPool.js';
@@ -48,6 +49,12 @@ export class Game {
         this.collision = new CollisionSystem();
         this.cameraRig = new CameraRig(this.camera);
         this.noise = new NoiseSystem();
+        this.audio = new AudioSystem();
+
+        // Разблокировать звук при первом взаимодействии
+        const unlockAudio = () => this.audio.unlock();
+        window.addEventListener('pointerdown', unlockAudio, { once: true });
+        window.addEventListener('keydown', unlockAudio, { once: true });
 
         // --- Мир ---
         this.world = new World(this.scene, this.collision);
@@ -62,7 +69,7 @@ export class Game {
         this.noiseRing = new NoiseRing(this.scene);
         this.muzzleFlash = new MuzzleFlash(this.scene);
 
-        // --- Враги: смешанный спавн (walkers + sniffer + listener + screamer) ---
+        // --- Враги ---
         this.spawner = new SpawnSystem(this.scene, this.collision);
         this.spawner.spawnMixed(this.player.position);
 
@@ -118,9 +125,14 @@ export class Game {
         // --- Игрок ---
         this.player.update(dt, input, aimPoint, this.collision);
 
-        // --- Следы ---
+        // --- Следы + звук шага ---
         if (this.player.didStep) {
             this.footprints.spawn(this.player.position.x, this.player.position.z);
+
+            const stepType = this.player.state === 'CROUCH' ? 'crouch'
+                           : this.player.state === 'SPRINT' ? 'sprint'
+                           : 'walk';
+            this.audio.playStep(stepType);
         }
 
         // --- Стрельба ---
@@ -133,6 +145,7 @@ export class Game {
             );
             this.noise.addImpulse('shot');
             this.muzzleFlash.trigger(this.player.position, this.player._shotDir);
+            this.audio.playShot();
         }
 
         // --- Одноразовые действия → шум ---
