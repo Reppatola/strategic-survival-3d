@@ -9,6 +9,8 @@ import { CollisionSystem } from '../systems/CollisionSystem.js';
 import { CameraRig } from '../systems/CameraRig.js';
 import { NoiseSystem } from '../systems/NoiseSystem.js';
 import { Player } from '../entities/Player.js';
+import { BulletPool } from '../entities/BulletPool.js';
+import { SpawnSystem } from '../systems/SpawnSystem.js';
 import { World } from '../world/World.js';
 import { HUD } from '../ui/HUD.js';
 
@@ -52,6 +54,11 @@ export class Game {
 
         // --- Игрок ---
         this.player = new Player();
+        this.bullets = new BulletPool(this.scene);
+        this.spawner = new SpawnSystem(this.scene, this.collision);
+
+        // Спавним 8 зомби вокруг игрока
+        this.spawner.spawnRing(this.player.position, 8, 40, 80);
         this.scene.add(this.player.mesh);
 
         // --- UI ---
@@ -99,7 +106,7 @@ export class Game {
         this.scene.add(grid);
     }
 
-    _update(dt, elapsed) {
+        _update(dt, elapsed) {
         // 1. Ввод
         const input = this.input.sample();
 
@@ -109,27 +116,38 @@ export class Game {
         // 3. Игрок
         this.player.update(dt, input, aimPoint, this.collision);
 
-        // 4. Стрельба → импульс шума
-        if (input.fire) {
+        // 4. Стрельба игрока → спавним пулю + импульс шума
+        if (this.player.didShoot) {
+            this.bullets.spawn(
+                this.player.position.x,
+                this.player.position.z,
+                this.player._shotDir.dx,
+                this.player._shotDir.dz
+            );
             this.noise.addImpulse();
-            input.fire = false; // ограничение в один импульс за кадр
         }
 
-        // 5. Шум
+        // 5. Пули
+        this.bullets.update(dt, this.collision);
+
+        // 6. Зомби
+        this.spawner.update(dt, this.player.position, this.collision, this.bullets);
+
+        // 7. Шум
         this.noise.update(dt, this.player.state);
 
-        // 6. Камера
+        // 8. Камера
         this.cameraRig.update(dt, this.player.position, aimPoint);
 
-        // 7. Солнце следует за игроком
+        // 9. Солнце следует за игроком
         this.sun.position.set(this.player.position.x + 35, 55, this.player.position.z + 20);
         this.sun.target.position.copy(this.player.position);
         this.sun.target.updateMatrixWorld();
 
-        // 8. HUD
+        // 10. HUD
         this.hud.update(this.player, this.noise);
 
-        // 9. Рендер
+        // 11. Рендер
         this.renderer.render(this.scene, this.camera);
     }
 

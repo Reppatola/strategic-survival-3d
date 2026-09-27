@@ -14,6 +14,9 @@ export class Player {
         // Состояние для других систем
         this.state = 'IDLE';
         this.aimLen = 0;
+        this._fireCooldown = 0;
+        this.didShoot = false;
+        this._shotDir = { dx: 0, dz: 1 };
     }
 
     _buildModel() {
@@ -65,6 +68,17 @@ export class Player {
         } else {
             this.state = 'IDLE';
         }
+
+        // Возвращаем информацию о выстреле — Game сам вызовет BulletPool
+        this.didShoot = false;
+        if (input.fire && this._fireCooldown <= 0 && this.aimLen > 0.5) {
+            const dx = ax / this.aimLen;
+            const dz = az / this.aimLen;
+            this._shotDir = { dx, dz };
+            this.didShoot = true;
+            this._fireCooldown = 0.16;
+        }
+        this._fireCooldown = Math.max(0, this._fireCooldown - dt);
     }
 
     _shortestAngle(from, to) {
