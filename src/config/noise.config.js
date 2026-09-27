@@ -24,6 +24,7 @@ export const NOISE = {
         shotgun:     { name: 'shotgun',     level: 125, decay: 55 },
         rifle:       { name: 'rifle',       level: 130, decay: 60 },
         boom:        { name: 'boom',        level: 145, decay: 45 },
+        scream:      { name: 'scream',      level: 120, decay: 20 },
     },
 
     silentThreshold: 0.5,

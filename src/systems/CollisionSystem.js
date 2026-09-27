@@ -30,4 +30,16 @@ export class CollisionSystem {
         if (!this.isBlocked(nx, position.z)) { position.x = nx; return; }
         if (!this.isBlocked(position.x, nz)) { position.z = nz; }
     }
+
+    // Проверяет, перекрыт ли отрезок между двумя точками зданием.
+    // Используем для видимости: если между зомби и игроком есть стена — не видит.
+    lineBlocked(x1, z1, x2, z2, samples = 20) {
+        for (let i = 1; i < samples; i++) {
+            const t = i / samples;
+            const x = x1 + (x2 - x1) * t;
+            const z = z1 + (z2 - z1) * t;
+            if (this.isBlocked(x, z)) return true;
+        }
+        return false;
+    }
 }

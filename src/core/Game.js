@@ -62,9 +62,9 @@ export class Game {
         this.noiseRing = new NoiseRing(this.scene);
         this.muzzleFlash = new MuzzleFlash(this.scene);
 
-        // --- Враги ---
+        // --- Враги: смешанный спавн (walkers + sniffer + listener + screamer) ---
         this.spawner = new SpawnSystem(this.scene, this.collision);
-        this.spawner.spawnRing(this.player.position, 8, 40, 80);
+        this.spawner.spawnMixed(this.player.position);
 
         // --- UI ---
         this.hud = new HUD();
@@ -147,11 +147,11 @@ export class Game {
         // --- Шум ---
         this.noise.update(dt, this.player.state);
 
-        // --- Зомби: передаём всю систему шума, а не число ---
+        // --- Зомби ---
         const damageToPlayer = this.spawner.update(
             dt,
             this.player.position,
-            this.noise,           // ← объект NoiseSystem
+            this.noise,
             this.player.dead,
             this.collision,
             this.bullets
