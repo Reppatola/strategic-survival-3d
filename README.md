@@ -1,4 +1,3 @@
-cat > README.md << 'ENDOFREADME'
 # Strategic Survival 3D
 
 **Версия: 0010v.28.09.2026** · [Changelog](./CHANGELOG.md)
