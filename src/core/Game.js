@@ -1,15 +1,16 @@
-// Оркестратор. Создаёт сцену, камеру, свет, землю.
-// Позже сюда добавим Player, CameraRig, NoiseSystem.
 import * as THREE from 'three';
 import { Loop } from './Loop.js';
 import { Renderer } from './Renderer.js';
 import { GAME } from '../config/game.config.js';
 import { CAMERA } from '../config/camera.config.js';
+import { InputSystem } from '../systems/InputSystem.js';
+import { AimSystem } from '../systems/AimSystem.js';
+import { CollisionSystem } from '../systems/CollisionSystem.js';
+import { CameraRig } from '../systems/CameraRig.js';
+import { Player } from '../entities/Player.js';
 
 export class Game {
     constructor(container) {
-        this.container = container;
-
         // --- Рендер ---
         this.renderer = new Renderer(container);
 
@@ -25,17 +26,29 @@ export class Game {
             CAMERA.near,
             CAMERA.far
         );
-        this.camera.position.set(0, CAMERA.height, 0);
-        this.camera.lookAt(0, 0, 0);
 
         this.renderer.onResize((w, h) => {
             this.camera.aspect = w / h;
             this.camera.updateProjectionMatrix();
         });
 
-        // --- Наполнение ---
+        // --- Наполнение сцены ---
         this._setupLights();
         this._setupGround();
+
+        // --- Системы ---
+        this.input = new InputSystem();
+        this.aim = new AimSystem(this.camera);
+        this.collision = new CollisionSystem();
+        this.cameraRig = new CameraRig(this.camera);
+
+        // --- Игрок ---
+        this.player = new Player();
+        this.scene.add(this.player.mesh);
+
+        // Временные препятствия для проверки коллизии
+        this._addTempObstacle(-20, 0, 8, 8);
+        this._addTempObstacle(15, 15, 10, 6);
 
         // --- Цикл ---
         this.loop = new Loop((dt, elapsed) => this._update(dt, elapsed));
@@ -59,6 +72,8 @@ export class Game {
 
         this.scene.add(sun);
         this.scene.add(sun.target);
+
+        // ВАЖНО: сохраняем ссылку — она нужна в _update()
         this.sun = sun;
     }
 
@@ -78,17 +93,40 @@ export class Game {
         this.scene.add(grid);
     }
 
+    _addTempObstacle(x, z, w, d) {
+        const box = new THREE.Mesh(
+            new THREE.BoxGeometry(w, 6, d),
+            new THREE.MeshStandardMaterial({ color: 0xd9b48f, flatShading: true })
+        );
+        box.position.set(x, 3, z);
+        box.castShadow = true;
+        box.receiveShadow = true;
+        this.scene.add(box);
+        this.collision.registerBox(x, z, w, d);
+    }
+
     _update(dt, elapsed) {
-        // Пока пусто — только рендер.
-        // Здесь появятся player.update(), cameraRig.update(), noise.update()...
+        // 1. Снять ввод
+        const input = this.input.sample();
+
+        // 2. Прицел: экран → точка на земле
+        const aimPoint = this.aim.update(input.mouseNDC);
+
+        // 3. Игрок
+        this.player.update(dt, input, aimPoint, this.collision);
+
+        // 4. Камера
+        this.cameraRig.update(dt, this.player.position, aimPoint);
+
+        // 5. Солнце следует за игроком
+        this.sun.position.set(this.player.position.x + 35, 55, this.player.position.z + 20);
+        this.sun.target.position.copy(this.player.position);
+        this.sun.target.updateMatrixWorld();
+
+        // 6. Рендер
         this.renderer.render(this.scene, this.camera);
     }
 
-    start() {
-        this.loop.start();
-    }
-
-    stop() {
-        this.loop.stop();
-    }
+    start() { this.loop.start(); }
+    stop()  { this.loop.stop(); }
 }
