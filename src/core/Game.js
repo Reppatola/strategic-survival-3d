@@ -22,7 +22,11 @@ import { DamageIndicator } from '../ui/DamageIndicator.js';
 import { SensorVisualizer } from '../debug/SensorVisualizer.js';
 
 export class Game {
-    constructor(container) {
+    constructor(container, { onPlayerDeath } = {}) {
+        this.container = container;
+        this.onPlayerDeath = onPlayerDeath || null;
+        this._deathFired = false;
+
         this.renderer = new Renderer(container);
 
         this.scene = new THREE.Scene();
@@ -122,6 +126,12 @@ export class Game {
     }
 
     _update(dt, elapsed) {
+        // Если игрок мёртв и колбэк ещё не вызван — вызываем один раз
+        if (this.player.dead && !this._deathFired) {
+            this._deathFired = true;
+            if (this.onPlayerDead) this.onPlayerDead();
+        }
+
         const input = this.input.sample();
         const aimPoint = this.aim.update(input.mouseNDC);
 
@@ -216,4 +226,5 @@ export class Game {
 
     start() { this.loop.start(); }
     stop()  { this.loop.stop(); }
+    isRunning() { return this.loop.running; }
 }
