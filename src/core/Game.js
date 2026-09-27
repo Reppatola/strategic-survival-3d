@@ -9,10 +9,12 @@ import { CollisionSystem } from '../systems/CollisionSystem.js';
 import { CameraRig } from '../systems/CameraRig.js';
 import { NoiseSystem } from '../systems/NoiseSystem.js';
 import { SpawnSystem } from '../systems/SpawnSystem.js';
+import { AlertSystem } from '../systems/AlertSystem.js';
 import { Player } from '../entities/Player.js';
 import { BulletPool } from '../entities/BulletPool.js';
 import { World } from '../world/World.js';
 import { HUD } from '../ui/HUD.js';
+import { DamageIndicator } from '../ui/DamageIndicator.js';
 
 export class Game {
     constructor(container) {
@@ -47,6 +49,7 @@ export class Game {
         this.collision = new CollisionSystem();
         this.cameraRig = new CameraRig(this.camera);
         this.noise = new NoiseSystem();
+        this.alert = new AlertSystem();
 
         // --- Мир ---
         this.world = new World(this.scene, this.collision);
@@ -62,6 +65,7 @@ export class Game {
 
         // --- UI ---
         this.hud = new HUD();
+        this.damageIndicator = new DamageIndicator();
 
         // --- Цикл ---
         this.loop = new Loop((dt, elapsed) => this._update(dt, elapsed));
@@ -132,7 +136,10 @@ export class Game {
         // 6. Шум
         this.noise.update(dt, this.player.state);
 
-        // 7. Зомби → урон игроку
+        // 7. Тревога (читает свежий шум)
+        this.alert.update(dt, this.noise.total);
+
+        // 8. Зомби → урон игроку
         const damageToPlayer = this.spawner.update(
             dt,
             this.player.position,
@@ -143,20 +150,22 @@ export class Game {
         );
         if (damageToPlayer > 0) {
             this.player.takeDamage(damageToPlayer);
+            this.damageIndicator.flash();
         }
 
-        // 8. Камера
+        // 9. Камера
         this.cameraRig.update(dt, this.player.position, aimPoint);
 
-        // 9. Солнце
+        // 10. Солнце
         this.sun.position.set(this.player.position.x + 35, 55, this.player.position.z + 20);
         this.sun.target.position.copy(this.player.position);
         this.sun.target.updateMatrixWorld();
 
-        // 10. HUD
-        this.hud.update(this.player, this.noise);
+        // 11. UI
+        this.damageIndicator.update(dt);
+        this.hud.update(this.player, this.noise, this.alert);
 
-        // 11. Рендер
+        // 12. Рендер
         this.renderer.render(this.scene, this.camera);
     }
 
