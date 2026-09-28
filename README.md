@@ -1,6 +1,6 @@
 # Strategic Survival 3D
 
-**Версия: 0010v.28.09.2026** · [Changelog](./CHANGELOG.md)
+**Версия: 0017v.28.09.2026** · [Changelog](./CHANGELOG.md)
 
 Twin-stick survival в one-point perspective. Ты видишь мир сверху, но камера слегка «заглядывает» туда, куда смотрит прицел — так ты видишь угрозу раньше, чем она увидит тебя.
 
