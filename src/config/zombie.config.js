@@ -68,7 +68,7 @@ export const ZOMBIE_TYPES = {
         vision:  { range: 25, angle: 70 },
         hearing: { sensitivity: 1.2 },
         smell:   { range: 0, angle: 0 },
-        scream:  { cooldown: 8, range: 25 },
+        scream:  { cooldown: 4, range: 25 },
 
         // ALERT = длительность крика (1.4 сек). Игрок слышит крик
         // пока есть окно среагировать, а не до его начала.

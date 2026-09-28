@@ -3,6 +3,9 @@
 //
 // ALERT — «замер и поворот к сигналу». Даёт игроку окно среагировать.
 // Длительность = base × (1 − confidence_bonus) × silence_penalty.
+//
+// Крикун: кричит при входе в ALERT и повторно в CHASE, пока видит/слышит игрока.
+// Крик добавляет world-импульс 'scream' (120 dB) — зомби слышат его и идут.
 import * as THREE from 'three';
 import { ZOMBIE_TYPES, ZOMBIE } from '../config/zombie.config.js';
 
@@ -122,9 +125,22 @@ export class Zombie {
         return angle <= s.angle / 2;
     }
 
+    // ---------- КРИК ----------
+
+    // Крикун кричит: добавляет world-импульс в noiseSystem + флаг для Game.
+    // Может вызываться и из _enterAlert, и из CHASE.
+    _tryScream(noiseSystem) {
+        if (!this.type.scream) return;
+        if (this._screamCooldown > 0) return;
+
+        this._screamCooldown = this.type.scream.cooldown;
+        this.didScream = true;
+        noiseSystem.addImpulse('scream', this.position.x, this.position.z, 'world');
+    }
+
     // ---------- ПЕРЕХОДЫ ----------
 
-    _enterAlert(targetX, targetZ) {
+    _enterAlert(targetX, targetZ, noiseSystem) {
         const confidence = Math.max(this._hearingConfidence, this._visionConfidence);
         const bonus = ZOMBIE.confidenceAlertBonus * confidence;
         const penalty = this.type.alert.silencePenalty;
@@ -134,10 +150,8 @@ export class Zombie {
         this.state = 'ALERT';
         this._alertPulse = 0;
 
-        if (this.type.scream && this._screamCooldown <= 0) {
-            this._screamCooldown = this.type.scream.cooldown;
-            this.didScream = true;
-        }
+        // Крикун кричит в начале ALERT — окно среагировать = длительность крика
+        this._tryScream(noiseSystem);
     }
 
     _enterSearch(targetX, targetZ) {
@@ -183,8 +197,6 @@ export class Zombie {
             playerPos.z - this.position.z
         );
 
-        // Игрок вплотную: зомби не может его «потерять».
-        // attackRange * 1.5 ≈ 2.1 м — буфер вокруг реальной дистанции удара.
         const nearPlayer = distToPlayer < ZOMBIE.attackRange * 1.5;
 
         // --- Сенсоры ---
@@ -199,7 +211,9 @@ export class Zombie {
         // --- State machine ---
         switch (this.state) {
             case 'IDLE': {
-                if (sees || hears || smells) this._enterAlert(playerPos.x, playerPos.z);
+                if (sees || hears || smells) {
+                    this._enterAlert(playerPos.x, playerPos.z, noiseSystem);
+                }
                 break;
             }
 
@@ -237,7 +251,7 @@ export class Zombie {
                 );
 
                 if (sees || nearPlayer) {
-                    this._enterAlert(playerPos.x, playerPos.z);
+                    this._enterAlert(playerPos.x, playerPos.z, noiseSystem);
                 } else if (hears && this._hearingConfidence > ZOMBIE.chaseJumpConfidence) {
                     this.state = 'CHASE';
                     this.lastKnownPos.set(playerPos.x, 0, playerPos.z);
@@ -254,15 +268,12 @@ export class Zombie {
             }
 
             case 'CHASE': {
-                // Игрок вплотную — не теряем его, даже если отвернулись.
                 const seesOrNear = sees || nearPlayer;
 
                 if (seesOrNear) {
                     this.lastKnownPos.set(playerPos.x, 0, playerPos.z);
                     this._timeSinceSignal = 0;
 
-                    // Вплотную, но не видим — принудительно поворачиваемся к игроку.
-                    // (иначе зомби стоит спиной и «слепнет» по конусу)
                     if (nearPlayer && !sees) {
                         this._facePoint(playerPos.x, playerPos.z, dt, 10);
                     }
@@ -272,6 +283,11 @@ export class Zombie {
                         this._enterSearch(playerPos.x, playerPos.z);
                         break;
                     }
+                }
+
+                // --- Крикун кричит повторно, пока видит/слышит игрока ---
+                if (sees || hears) {
+                    this._tryScream(noiseSystem);
                 }
 
                 this._moveTowards(this.lastKnownPos.x, this.lastKnownPos.z, dt, collision);
