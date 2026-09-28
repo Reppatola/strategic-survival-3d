@@ -54,7 +54,6 @@ export class Zombie {
         head.position.y = 1.65;
         head.castShadow = true;
 
-        // Кольцо-индикатор ALERT вокруг зомби. Видно всегда, не только в debug.
         const ringGeo = new THREE.RingGeometry(0.65, 0.8, 24);
         const ringMat = new THREE.MeshBasicMaterial({
             color: 0xffcc00,
@@ -135,7 +134,6 @@ export class Zombie {
         this.state = 'ALERT';
         this._alertPulse = 0;
 
-        // Крикун кричит в начале ALERT — окно среагировать = длительность крика
         if (this.type.scream && this._screamCooldown <= 0) {
             this._screamCooldown = this.type.scream.cooldown;
             this.didScream = true;
@@ -143,7 +141,6 @@ export class Zombie {
     }
 
     _enterSearch(targetX, targetZ) {
-        // Разброс цели поиска — небольшой круг вокруг последней точки
         const r = this.type.search.radius;
         const a = Math.random() * Math.PI * 2;
         this.lastKnownPos.set(
@@ -155,7 +152,7 @@ export class Zombie {
         this.state = 'SEARCH';
     }
 
-    _facePoint(x, z, dt) {
+    _facePoint(x, z, dt, rate = 8) {
         const dx = x - this.position.x;
         const dz = z - this.position.z;
         if (Math.hypot(dx, dz) < 0.01) return;
@@ -163,7 +160,7 @@ export class Zombie {
         let d = (target - this.mesh.rotation.y) % (Math.PI * 2);
         if (d > Math.PI) d -= Math.PI * 2;
         if (d < -Math.PI) d += Math.PI * 2;
-        this.mesh.rotation.y += d * Math.min(1, dt * 8);
+        this.mesh.rotation.y += d * Math.min(1, dt * rate);
     }
 
     // ---------- ОБНОВЛЕНИЕ ----------
@@ -186,6 +183,10 @@ export class Zombie {
             playerPos.z - this.position.z
         );
 
+        // Игрок вплотную: зомби не может его «потерять».
+        // attackRange * 1.5 ≈ 2.1 м — буфер вокруг реальной дистанции удара.
+        const nearPlayer = distToPlayer < ZOMBIE.attackRange * 1.5;
+
         // --- Сенсоры ---
         const sees = this._senseVision(playerPos, collision);
         this._visionConfidence = THREE.MathUtils.clamp(
@@ -198,9 +199,7 @@ export class Zombie {
         // --- State machine ---
         switch (this.state) {
             case 'IDLE': {
-                if (sees) this._enterAlert(playerPos.x, playerPos.z);
-                else if (hears) this._enterAlert(playerPos.x, playerPos.z);
-                else if (smells) this._enterAlert(playerPos.x, playerPos.z);
+                if (sees || hears || smells) this._enterAlert(playerPos.x, playerPos.z);
                 break;
             }
 
@@ -209,7 +208,6 @@ export class Zombie {
                 this._alertPulse += dt * 6;
                 this.alertRing.material.opacity = 0.4 + Math.sin(this._alertPulse) * 0.3;
 
-                // Обновляем сигнал, если что-то видно
                 if (sees || hears) {
                     this.alertSignal.set(playerPos.x, 0, playerPos.z);
                 }
@@ -238,7 +236,7 @@ export class Zombie {
                     this.lastKnownPos.z - this.position.z
                 );
 
-                if (sees) {
+                if (sees || nearPlayer) {
                     this._enterAlert(playerPos.x, playerPos.z);
                 } else if (hears && this._hearingConfidence > ZOMBIE.chaseJumpConfidence) {
                     this.state = 'CHASE';
@@ -256,9 +254,18 @@ export class Zombie {
             }
 
             case 'CHASE': {
-                if (sees) {
+                // Игрок вплотную — не теряем его, даже если отвернулись.
+                const seesOrNear = sees || nearPlayer;
+
+                if (seesOrNear) {
                     this.lastKnownPos.set(playerPos.x, 0, playerPos.z);
                     this._timeSinceSignal = 0;
+
+                    // Вплотную, но не видим — принудительно поворачиваемся к игроку.
+                    // (иначе зомби стоит спиной и «слепнет» по конусу)
+                    if (nearPlayer && !sees) {
+                        this._facePoint(playerPos.x, playerPos.z, dt, 10);
+                    }
                 } else {
                     this._timeSinceSignal += dt;
                     if (this._timeSinceSignal > ZOMBIE.chaseLossTimeout) {

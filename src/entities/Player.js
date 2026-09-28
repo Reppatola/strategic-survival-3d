@@ -1,4 +1,4 @@
-// Игрок: модель, движение по 8 направлениям, поворот, стрельба, HP, следы.
+// Игрок: многочастная модель, движение, поворот, стрельба, HP, следы, анимация.
 import * as THREE from 'three';
 import { PLAYER } from '../config/player.config.js';
 import { GAME } from '../config/game.config.js';
@@ -8,6 +8,12 @@ export class Player {
         this.mesh = new THREE.Group();
         this.position = this.mesh.position;
 
+        // Визуальный контейнер — качается при ходьбе, не двигает мир.
+        // Важно: bob применяется сюда, а не к this.mesh, иначе игрок «улетит» вверх.
+        this.bodyGroup = new THREE.Group();
+        this.mesh.add(this.bodyGroup);
+
+        this._walkPhase = 0;
         this._buildModel();
 
         this.state = 'IDLE';
@@ -18,7 +24,12 @@ export class Player {
         this.didShoot = false;
         this._shotDir = { dx: 0, dz: 1 };
 
-        // Здоровье
+        // Одноразовые действия
+        this.didMelee = false;
+        this.didGlass = false;
+        this.didBoom  = false;
+
+        // HP
         this.hp = 100;
         this.maxHp = 100;
         this.dead = false;
@@ -30,26 +41,93 @@ export class Player {
     }
 
     _buildModel() {
-        const body = new THREE.Mesh(
-            new THREE.CapsuleGeometry(0.45, 0.9, 6, 12),
-            new THREE.MeshStandardMaterial({ color: 0xffcf5a, flatShading: true })
-        );
-        body.position.y = 1.0;
-        body.castShadow = true;
+        const bodyMat = new THREE.MeshStandardMaterial({ color: 0xffcf5a, flatShading: true });
+        const limbMat = new THREE.MeshStandardMaterial({ color: 0xd9a840, flatShading: true });
+        const darkMat = new THREE.MeshStandardMaterial({ color: 0x222831 });
+        const gunMat  = new THREE.MeshStandardMaterial({ color: 0x333333 });
 
+        // --- Торс ---
+        const torso = new THREE.Mesh(
+            new THREE.BoxGeometry(0.6, 0.7, 0.4),
+            bodyMat
+        );
+        torso.position.y = 1.0;
+        torso.castShadow = true;
+
+        // --- Голова ---
+        const head = new THREE.Mesh(
+            new THREE.SphereGeometry(0.28, 10, 8),
+            bodyMat
+        );
+        head.position.y = 1.55;
+        head.castShadow = true;
+
+        // --- Визор (показывает направление взгляда) ---
         const visor = new THREE.Mesh(
-            new THREE.BoxGeometry(0.5, 0.18, 0.3),
-            new THREE.MeshStandardMaterial({ color: 0x222831 })
+            new THREE.BoxGeometry(0.42, 0.12, 0.15),
+            darkMat
         );
-        visor.position.set(0, 1.45, 0.38);
+        visor.position.set(0, 1.6, 0.22);
 
+        // --- Левая рука (качается при ходьбе) ---
+        // Пивот в плече, капсула смещена вниз — вращается вокруг плеча.
+        this._leftArmPivot = new THREE.Group();
+        this._leftArmPivot.position.set(-0.4, 1.15, 0);
+
+        const leftArm = new THREE.Mesh(
+            new THREE.CapsuleGeometry(0.11, 0.5, 4, 8),
+            limbMat
+        );
+        leftArm.position.y = -0.35;
+        leftArm.castShadow = true;
+        this._leftArmPivot.add(leftArm);
+
+        // --- Правая рука (держит пистолет, статична) ---
+        const rightArm = new THREE.Mesh(
+            new THREE.CapsuleGeometry(0.11, 0.5, 4, 8),
+            limbMat
+        );
+        rightArm.position.set(0.4, 0.95, 0.1);
+        rightArm.rotation.x = -Math.PI / 2.4;
+        rightArm.castShadow = true;
+
+        // --- Пистолет ---
         const gun = new THREE.Mesh(
-            new THREE.BoxGeometry(0.16, 0.16, 0.9),
-            new THREE.MeshStandardMaterial({ color: 0x333333 })
+            new THREE.BoxGeometry(0.14, 0.12, 0.5),
+            gunMat
         );
-        gun.position.set(0.4, 1.0, 0.3);
+        gun.position.set(0.32, 0.9, 0.4);
+        gun.castShadow = true;
 
-        this.mesh.add(body, visor, gun);
+        // --- Ноги (качаются при ходьбе) ---
+        this._leftLegPivot = new THREE.Group();
+        this._leftLegPivot.position.set(-0.16, 0.65, 0);
+
+        const leftLeg = new THREE.Mesh(
+            new THREE.CapsuleGeometry(0.13, 0.45, 4, 8),
+            limbMat
+        );
+        leftLeg.position.y = -0.35;
+        leftLeg.castShadow = true;
+        this._leftLegPivot.add(leftLeg);
+
+        this._rightLegPivot = new THREE.Group();
+        this._rightLegPivot.position.set(0.16, 0.65, 0);
+
+        const rightLeg = new THREE.Mesh(
+            new THREE.CapsuleGeometry(0.13, 0.45, 4, 8),
+            limbMat
+        );
+        rightLeg.position.y = -0.35;
+        rightLeg.castShadow = true;
+        this._rightLegPivot.add(rightLeg);
+
+        // Всё — в bodyGroup, чтобы bob не сдвигал world position
+        this.bodyGroup.add(
+            torso, head, visor,
+            this._leftArmPivot, rightArm, gun,
+            this._leftLegPivot, this._rightLegPivot
+        );
     }
 
     takeDamage(amount) {
@@ -63,11 +141,15 @@ export class Player {
         this._invulnTimer = Math.max(0, this._invulnTimer - dt);
         this._fireCooldown = Math.max(0, this._fireCooldown - dt);
 
-        // Мёртвый игрок не двигается и не стреляет
+        this.didMelee = false;
+        this.didGlass = false;
+        this.didBoom  = false;
+
         if (this.dead) {
             this.state = 'DEAD';
             this.didShoot = false;
-            this.didStep = false;
+            this.didStep  = false;
+            this._animateIdle();
             return;
         }
 
@@ -95,13 +177,16 @@ export class Player {
             const nz = THREE.MathUtils.clamp(this.position.z + dz * speed * dt, -GAME.worldHalf, GAME.worldHalf);
 
             collision.move(this.position, nx, nz);
-
             this.state = input.crouch ? 'CROUCH' : input.sprint ? 'SPRINT' : 'WALK';
         } else {
             this.state = 'IDLE';
         }
 
-        // --- Следы: спавним каждые N секунд при движении ---
+        // --- Анимация ---
+        if (input.moving) this._animateWalk(dt);
+        else this._animateIdle();
+
+        // --- Следы ---
         this.didStep = false;
         if (input.moving) {
             this._stepTimer -= dt;
@@ -114,6 +199,11 @@ export class Player {
             this._stepTimer = 0;
         }
 
+        // --- Действия ---
+        if (input.pressedQ) this.didMelee = true;
+        if (input.pressedE) this.didGlass = true;
+        if (input.pressedF) this.didBoom  = true;
+
         // --- Стрельба ---
         this.didShoot = false;
         if (input.fire && this._fireCooldown <= 0 && this.aimLen > 0.5) {
@@ -122,6 +212,29 @@ export class Player {
             this.didShoot = true;
             this._fireCooldown = 0.16;
         }
+    }
+
+    // --- Ходьба: ноги машут, тело подпрыгивает, левая рука в противофазе ---
+    _animateWalk(dt) {
+        const speedScale = this.state === 'SPRINT' ? 14 : this.state === 'CROUCH' ? 6 : 9;
+        const amplitude  = this.state === 'SPRINT' ? 0.65 : this.state === 'CROUCH' ? 0.22 : 0.45;
+
+        this._walkPhase += dt * speedScale;
+        const s = Math.sin(this._walkPhase);
+
+        this.bodyGroup.position.y = Math.abs(s) * 0.06;
+
+        this._leftLegPivot.rotation.x  =  s * amplitude;
+        this._rightLegPivot.rotation.x = -s * amplitude;
+        this._leftArmPivot.rotation.x  = -s * amplitude * 0.7;
+    }
+
+    // --- Покой: плавный возврат конечностей в ноль ---
+    _animateIdle() {
+        this.bodyGroup.position.y     *= 0.85;
+        this._leftLegPivot.rotation.x *= 0.85;
+        this._rightLegPivot.rotation.x *= 0.85;
+        this._leftArmPivot.rotation.x *= 0.85;
     }
 
     _shortestAngle(from, to) {
