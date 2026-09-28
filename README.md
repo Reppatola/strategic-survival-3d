@@ -153,6 +153,20 @@ src/ui/ — HUD, Crosshair, DamageIndicator.
 src/debug/ — SensorVisualizer (клавиша V).
 src/i18n/ — локализация (en, ru, fr, de, es).
 
+## 🎨 Концепты
+
+Рисунки будущих 3D-моделей лежат в [`docs/concepts/`](./docs/concepts/).
+
+| Категория | Что там |
+|---|---|
+| [Зомби](./docs/concepts/zombies/) | Walker, Sniffer, Listener, Screamer — концепты всех типов |
+| [Игрок](./docs/concepts/player/) | Силуэт, одежда, оружие |
+| [Здания](./docs/concepts/buildings/) | Дома, крыши, разрушенные |
+| [Объекты](./docs/concepts/props/) | Деревья, ящики, бочки, фонари |
+| [Окружение](./docs/concepts/environment/) | Земля, дороги, заборы |
+
+**Статусы:** 📝 Концепт → 🎨 Модель → 🎮 В игре
+
 ## Принципы архитектуры
 
 1. Один файл — одна ответственность. Zombie.js знает только про зомби.
