@@ -46,8 +46,9 @@ export class MainMenu {
         this.playBtn    = this._makeButton('ИГРАТЬ',    () => this._handle('play'));
         this.restartBtn = this._makeButton('ПЕРЕИГРАТЬ', () => this._handle('restart'));
         this.exitBtn    = this._makeButton('ВЫХОД',     () => this._handle('exit'));
+        this.wikiBtn = this._makeButton('ВИКИ ПРОЕКТА', () => this._handle('wiki'));
 
-        this.el.append(this.playBtn, this.restartBtn, this.exitBtn);
+        this.el.append(this.playBtn, this.restartBtn, this.wikiBtn, this.exitBtn);
 
         // Подсказка снизу
         const hint = document.createElement('div');
@@ -101,6 +102,9 @@ export class MainMenu {
         if (action === 'play'    && this.onPlay)    this.onPlay();
         if (action === 'restart' && this.onRestart) this.onRestart();
         if (action === 'exit'    && this.onExit)    this.onExit();
+        if (action === 'wiki') {
+            window.open('https://reppatola.github.io/strategic-survival-wiki/', '_blank', 'noopener');
+        }
     }
 
     show() {

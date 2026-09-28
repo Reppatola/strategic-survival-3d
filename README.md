@@ -1,8 +1,11 @@
 # Strategic Survival 3D
 
-**Версия: 0017v.28.09.2026** · [Changelog](./CHANGELOG.md)
+> 📖 **[Читать вики проекта →](https://reppatola.github.io/strategic-survival-wiki/)**
+> Лор, мир, зомби, фракции — всё, что нужно знать об игре.
 
-Twin-stick survival в one-point perspective. Ты видишь мир сверху, но камера слегка «заглядывает» туда, куда смотрит прицел — так ты видишь угрозу раньше, чем она увидит тебя.
+**Версия: `0016v.28.09.2026`** · [Changelog](./CHANGELOG.md) · [Wiki](https://reppatola.github.io/strategic-survival-wiki/)
+
+Twin-stick survival в one-point perspective...
 
 ## Играть
 
