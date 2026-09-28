@@ -1,13 +1,15 @@
 // Debug-визуализация сенсоров зомби: зрение, слух, нюх.
-// Включается клавишей V. Не влияет на геймплей.
+// Включается клавишей V.
 import * as THREE from 'three';
 import { ZOMBIE } from '../config/zombie.config.js';
 
-const COLOR_VISION  = 0xffcc00;   // жёлтый
-const COLOR_SMELL   = 0xcc66ff;   // фиолетовый
-const COLOR_HEARING = 0xff8833;   // оранжевый
+const COLOR_VISION_IDLE  = 0xffcc00;
+const COLOR_VISION_ALERT = 0xffee44;
+const COLOR_VISION_CHASE = 0xff4444;
+const COLOR_SMELL        = 0xcc66ff;
+const COLOR_HEARING      = 0xff8833;
 
-const MAX_HEARING_RADIUS = 200;   // ограничение визуального радиуса слуха
+const MAX_HEARING_RADIUS = 200;
 
 export class SensorVisualizer {
     constructor(scene) {
@@ -18,12 +20,11 @@ export class SensorVisualizer {
         this.group.visible = false;
         scene.add(this.group);
 
-        // Слух — кольцо вокруг игрока (обновляется каждый кадр)
         this.hearingRing = this._makeRing(1, COLOR_HEARING, 0.35, 0.5);
         this.group.add(this.hearingRing);
 
-        // Кэш по зомби: { vision, smell }
         this.byZombie = new Map();
+        this._pulse = 0;
     }
 
     toggle() {
@@ -31,21 +32,18 @@ export class SensorVisualizer {
         this.group.visible = this.enabled;
     }
 
-    // --- Сектор зрения на земле ---
     _makeVisionCone(angleDeg, range) {
         const vAngle = angleDeg * Math.PI / 180;
         const vHalf = vAngle / 2;
-
-        // Сектор лежит в XY. Направляем центр в -Y (после rotateX станет +Z).
         const geo = new THREE.CircleGeometry(
             range, 32,
-            -Math.PI / 2 - vHalf,  // начало сектора
-            vAngle                 // длина сектора
+            -Math.PI / 2 - vHalf,
+            vAngle
         );
         geo.rotateX(-Math.PI / 2);
 
         const mat = new THREE.MeshBasicMaterial({
-            color: COLOR_VISION,
+            color: COLOR_VISION_IDLE,
             transparent: true,
             opacity: 0.15,
             side: THREE.DoubleSide,
@@ -56,7 +54,6 @@ export class SensorVisualizer {
         return mesh;
     }
 
-    // --- Тонкое кольцо (контур) ---
     _makeRing(radius, color, opacity = 0.25, thickness = 0.3) {
         const geo = new THREE.RingGeometry(
             Math.max(0, radius - thickness),
@@ -76,16 +73,11 @@ export class SensorVisualizer {
         return mesh;
     }
 
-    // --- Обновление каждый кадр ---
-    // zombies — массив из spawner.zombies
-    // noiseSystem — текущая система шума
-    // playerPos — позиция игрока
-    update(zombies, noiseSystem, playerPos) {
+    update(zombies, noiseSystem, playerPos, dt) {
         if (!this.enabled) return;
+        this._pulse += (dt || 0.016) * 6;
 
-        // --- Круг слуха вокруг игрока ---
-        // Радиус = где базовый walker (sensitivity 1.0) ещё слышит твой шум.
-        // Формула: d = 10^((ownTotal − threshold) / 20)
+        // --- Круг слуха ---
         const own = noiseSystem.ownTotal;
         let hearingRadius = 0;
         if (own > ZOMBIE.hearingThreshold) {
@@ -104,47 +96,48 @@ export class SensorVisualizer {
         // --- По каждому зомби ---
         for (const z of zombies) {
             let entry = this.byZombie.get(z);
-
-            // Создаём визуализации при первом появлении
             if (!entry) {
                 entry = {
-                    vision: this._makeVisionCone(
-                        z.type.vision.angle,
-                        z.type.vision.range
-                    ),
+                    vision: this._makeVisionCone(z.type.vision.angle, z.type.vision.range),
                     smell: null,
                 };
                 this.group.add(entry.vision);
-
                 if (z.type.smell.range > 0) {
-                    entry.smell = this._makeRing(
-                        z.type.smell.range,
-                        COLOR_SMELL,
-                        0.25,
-                        0.5
-                    );
+                    entry.smell = this._makeRing(z.type.smell.range, COLOR_SMELL, 0.25, 0.5);
                     this.group.add(entry.smell);
                 }
                 this.byZombie.set(z, entry);
             }
 
-            // Мёртвых скрываем
             const visible = z.alive;
             entry.vision.visible = visible;
             if (entry.smell) entry.smell.visible = visible;
             if (!visible) continue;
 
-            // Зрение: позиция + поворот по зомби
+            // Окраска конуса по состоянию
+            let color = COLOR_VISION_IDLE;
+            let opacity = 0.15;
+
+            if (z.state === 'CHASE') {
+                color = COLOR_VISION_CHASE;
+                opacity = 0.28;
+            } else if (z.state === 'ALERT') {
+                color = COLOR_VISION_ALERT;
+                opacity = 0.25 + Math.sin(this._pulse) * 0.15;
+            } else if (z.state === 'SEARCH') {
+                color = COLOR_VISION_IDLE;
+                opacity = 0.18;
+            }
+
+            entry.vision.material.color.setHex(color);
+            entry.vision.material.opacity = opacity;
+
             entry.vision.position.set(z.position.x, 0.05, z.position.z);
             entry.vision.rotation.y = z.mesh.rotation.y;
 
-            // Нюх: позиция
             if (entry.smell) {
                 entry.smell.position.set(z.position.x, 0.04, z.position.z);
             }
         }
-
-        // Чистим кэш от мёртвых, которых больше нет
-        // (можно не делать — они просто невидимы, но память не течёт)
     }
 }

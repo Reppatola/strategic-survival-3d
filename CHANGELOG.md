@@ -4,6 +4,29 @@
 
 ---
 
+## [0012v.28.09.2026] — ALERT-слой: окно реакции
+
+### Добавлено
+- **Состояние `ALERT`** в state machine зомби — замирание и поворот к сигналу.
+- **Формула длительности ALERT**: `base × (1 − confidence_bonus) × silence_penalty`.
+  Уверенность сенсора (слух/зрение) сокращает телеграф до −50%.
+- **`alert` и `search` блоки в конфиге** по типам: base, silencePenalty, persistence, radius.
+- **`_visionConfidence`** — аналог `_hearingConfidence`, растёт при визуальном контакте.
+- **Визуальный телеграф** — пульсирующее кольцо вокруг зомби в ALERT.
+- **Окраска конуса зрения по состоянию** в `SensorVisualizer`: жёлтый → ярко-жёлтый → красный.
+- **Screamer кричит в начале ALERT** — окно среагировать равно длительности крика.
+- **`ZOMBIE.confidenceAlertBonus`** (0.5), **`chaseLossTimeout`** (1.5 сек), **`chaseJumpConfidence`** (0.7).
+
+### Изменено
+- **`Zombie.js`** — полный rewrite с переходом на switch-case машину состояний.
+- **`zombie.config.js`** — новые блоки `alert` и `search` для каждого типа.
+- **`SensorVisualizer.js`** — принимает `dt`, пульсирует конус в ALERT.
+- **`Game.js`** — передаёт `dt` в `SensorVisualizer.update`.
+
+### Технически
+- **SEARCH длительность**: walker 5, sniffer 3, listener 10, screamer 10 сек.
+- **ALERT длительность**: walker 0.8, sniffer 1.1, listener 0.5, screamer 1.4 сек.
+
 ## [0011v.28.09.2026] — Главное меню
 
 ### Добавлено

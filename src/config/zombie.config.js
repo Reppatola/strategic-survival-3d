@@ -1,7 +1,13 @@
 // Типы зомби и их характеристики восприятия.
-// vision.angle — полный угол конуса в градусах.
-// hearing.sensitivity — множитель скорости накопления уверенности.
-// smell — нюх, постоянный сигнал по направлению к игроку.
+//
+// ALERT — промежуточное состояние между «заметил» и «бросился».
+// Даёт игроку окно среагировать. Длительность зависит от:
+//   - base: базовый телеграф для типа
+//   - confidence_bonus: чем увереннее сенсор, тем короче (макс -50%)
+//   - silence_penalty: множитель >1 для типов без шума движения (резерв на будущее)
+//
+// SEARCH — состояние после потери цели. Длительность = base × persistence.
+// Высокий persistence = упорный, долго ищет. Низкий = быстро переключается.
 
 export const ZOMBIE_TYPES = {
     walker: {
@@ -14,6 +20,9 @@ export const ZOMBIE_TYPES = {
         hearing: { sensitivity: 1.0 },
         smell:   { range: 0, angle: 0 },
         scream:  null,
+
+        alert:  { base: 0.8, silencePenalty: 1.0 },
+        search: { base: 5,   persistence: 1.0, radius: 4 },
     },
 
     sniffer: {
@@ -26,6 +35,11 @@ export const ZOMBIE_TYPES = {
         hearing: { sensitivity: 0.6 },
         smell:   { range: 45, angle: 90 },
         scream:  null,
+
+        // Нюхач — медленный, принюхивающийся. Телеграф длиннее,
+        // но SEARCH короткий: он теряет след и переключается на актуальный запах.
+        alert:  { base: 1.1, silencePenalty: 1.0 },
+        search: { base: 5,   persistence: 0.6, radius: 6 },
     },
 
     listener: {
@@ -38,6 +52,11 @@ export const ZOMBIE_TYPES = {
         hearing: { sensitivity: 2.5 },
         smell:   { range: 0, angle: 0 },
         scream:  null,
+
+        // Слухач рано замечает — короткий телеграф не делает его нечестным.
+        // SEARCH длинный: он и так на взводе, дольше прислушивается.
+        alert:  { base: 0.5, silencePenalty: 1.0 },
+        search: { base: 5,   persistence: 2.0, radius: 8 },
     },
 
     screamer: {
@@ -50,6 +69,11 @@ export const ZOMBIE_TYPES = {
         hearing: { sensitivity: 1.2 },
         smell:   { range: 0, angle: 0 },
         scream:  { cooldown: 8, range: 25 },
+
+        // ALERT = длительность крика (1.4 сек). Игрок слышит крик
+        // пока есть окно среагировать, а не до его начала.
+        alert:  { base: 1.4, silencePenalty: 1.0 },
+        search: { base: 5,   persistence: 2.0, radius: 6 },
     },
 };
 
@@ -57,10 +81,21 @@ export const ZOMBIE = {
     attackRange: 1.4,
     attackDamage: 10,
     attackCooldown: 1.0,
-    hearingThreshold: 18,      // dB, с которого начинает накапливаться уверенность
-    confidenceGain: 0.8,       // насколько быстро растёт уверенность
-    confidenceDecay: 0.4,      // насколько быстро падает
-    confidenceTrigger: 0.5,    // порог срабатывания
-    searchTimeout: 6,          // сек, после которых SEARCH → IDLE
-    arrivalDist: 1.0,          // м, с какого дистанции «пришёл» к цели
+
+    hearingThreshold: 18,
+    confidenceGain: 0.8,
+    confidenceDecay: 0.4,
+    confidenceTrigger: 0.5,
+
+    searchTimeout: 6,
+    arrivalDist: 1.0,
+
+    // Максимальное сокращение ALERT за счёт уверенности (0.5 = −50%)
+    confidenceAlertBonus: 0.5,
+
+    // Через сколько секунд в CHASE без сигнала переходим в SEARCH
+    chaseLossTimeout: 1.5,
+
+    // Порог уверенности слуха для прыжка SEARCH → CHASE
+    chaseJumpConfidence: 0.7,
 };

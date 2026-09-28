@@ -1,6 +1,8 @@
 // Зомби с системой восприятия: слух + зрение + нюх.
-// Позиционный слух: спрашивает уровень шума в СВОЕЙ точке.
-// Whiskers для обхода углов при движении.
+// Состояния: IDLE → ALERT → CHASE → SEARCH → IDLE.
+//
+// ALERT — «замер и поворот к сигналу». Даёт игроку окно среагировать.
+// Длительность = base × (1 − confidence_bonus) × silence_penalty.
 import * as THREE from 'three';
 import { ZOMBIE_TYPES, ZOMBIE } from '../config/zombie.config.js';
 
@@ -20,9 +22,17 @@ export class Zombie {
         // AI
         this.state = 'IDLE';
         this.lastKnownPos = new THREE.Vector3(x, 0, z);
+        this.alertSignal = new THREE.Vector3(x, 0, z);
+
+        this.alertTimer = 0;
+        this.searchTimer = 0;
+
         this._hearingConfidence = 0;
+        this._visionConfidence = 0;
         this._timeSinceSignal = 999;
         this._screamCooldown = 0;
+        this._alertPulse = 0;
+
         this.didScream = false;
         this.lastHeardLevel = 0;
 
@@ -44,7 +54,20 @@ export class Zombie {
         head.position.y = 1.65;
         head.castShadow = true;
 
-        this.mesh.add(body, head);
+        // Кольцо-индикатор ALERT вокруг зомби. Видно всегда, не только в debug.
+        const ringGeo = new THREE.RingGeometry(0.65, 0.8, 24);
+        const ringMat = new THREE.MeshBasicMaterial({
+            color: 0xffcc00,
+            transparent: true,
+            opacity: 0,
+            side: THREE.DoubleSide,
+            depthWrite: false,
+        });
+        this.alertRing = new THREE.Mesh(ringGeo, ringMat);
+        this.alertRing.rotation.x = -Math.PI / 2;
+        this.alertRing.position.y = 0.07;
+
+        this.mesh.add(body, head, this.alertRing);
     }
 
     // ---------- СЕНСОРЫ ----------
@@ -62,7 +85,6 @@ export class Zombie {
             this._hearingConfidence -= ZOMBIE.confidenceDecay * dt;
         }
         this._hearingConfidence = THREE.MathUtils.clamp(this._hearingConfidence, 0, 1);
-
         return this._hearingConfidence >= ZOMBIE.confidenceTrigger;
     }
 
@@ -101,6 +123,49 @@ export class Zombie {
         return angle <= s.angle / 2;
     }
 
+    // ---------- ПЕРЕХОДЫ ----------
+
+    _enterAlert(targetX, targetZ) {
+        const confidence = Math.max(this._hearingConfidence, this._visionConfidence);
+        const bonus = ZOMBIE.confidenceAlertBonus * confidence;
+        const penalty = this.type.alert.silencePenalty;
+
+        this.alertTimer = this.type.alert.base * (1 - bonus) * penalty;
+        this.alertSignal.set(targetX, 0, targetZ);
+        this.state = 'ALERT';
+        this._alertPulse = 0;
+
+        // Крикун кричит в начале ALERT — окно среагировать = длительность крика
+        if (this.type.scream && this._screamCooldown <= 0) {
+            this._screamCooldown = this.type.scream.cooldown;
+            this.didScream = true;
+        }
+    }
+
+    _enterSearch(targetX, targetZ) {
+        // Разброс цели поиска — небольшой круг вокруг последней точки
+        const r = this.type.search.radius;
+        const a = Math.random() * Math.PI * 2;
+        this.lastKnownPos.set(
+            targetX + Math.cos(a) * r * Math.random(),
+            0,
+            targetZ + Math.sin(a) * r * Math.random()
+        );
+        this.searchTimer = this.type.search.base * this.type.search.persistence;
+        this.state = 'SEARCH';
+    }
+
+    _facePoint(x, z, dt) {
+        const dx = x - this.position.x;
+        const dz = z - this.position.z;
+        if (Math.hypot(dx, dz) < 0.01) return;
+        const target = Math.atan2(dx, dz);
+        let d = (target - this.mesh.rotation.y) % (Math.PI * 2);
+        if (d > Math.PI) d -= Math.PI * 2;
+        if (d < -Math.PI) d += Math.PI * 2;
+        this.mesh.rotation.y += d * Math.min(1, dt * 8);
+    }
+
     // ---------- ОБНОВЛЕНИЕ ----------
 
     update(dt, playerPos, noiseSystem, playerDead, collision) {
@@ -112,6 +177,7 @@ export class Zombie {
 
         if (playerDead) {
             this.state = 'IDLE';
+            this.alertRing.material.opacity = 0;
             return 0;
         }
 
@@ -121,64 +187,99 @@ export class Zombie {
         );
 
         // --- Сенсоры ---
-        const seesPlayer = this._senseVision(playerPos, collision);
-        const hearsPlayer = this._senseHearing(dt, noiseSystem);
-        const smellsPlayer = this._senseSmell(playerPos);
+        const sees = this._senseVision(playerPos, collision);
+        this._visionConfidence = THREE.MathUtils.clamp(
+            this._visionConfidence + (sees ? dt * 1.5 : -ZOMBIE.confidenceDecay * dt),
+            0, 1
+        );
+        const hears = this._senseHearing(dt, noiseSystem);
+        const smells = this._senseSmell(playerPos);
 
-        // --- Логика переходов ---
-        if (seesPlayer) {
-            this.state = 'CHASE';
-            this.lastKnownPos.set(playerPos.x, 0, playerPos.z);
-            this._timeSinceSignal = 0;
-
-            // Крикун кричит ОТ СЕБЯ — позиционный источник шума
-            if (this.type.scream && this._screamCooldown <= 0) {
-                this._screamCooldown = this.type.scream.cooldown;
-                noiseSystem.addImpulse('scream', this.position.x, this.position.z, 'world');
-                this.didScream = true;
+        // --- State machine ---
+        switch (this.state) {
+            case 'IDLE': {
+                if (sees) this._enterAlert(playerPos.x, playerPos.z);
+                else if (hears) this._enterAlert(playerPos.x, playerPos.z);
+                else if (smells) this._enterAlert(playerPos.x, playerPos.z);
+                break;
             }
-        } else if (hearsPlayer) {
-            if (this.state !== 'CHASE') this.state = 'SEARCH';
-            this.lastKnownPos.set(playerPos.x, 0, playerPos.z);
-            this._timeSinceSignal = 0;
-        } else if (smellsPlayer) {
-            if (this.state === 'IDLE') this.state = 'SEARCH';
-            this.lastKnownPos.set(
-                playerPos.x + (Math.random() - 0.5) * 8,
-                0,
-                playerPos.z + (Math.random() - 0.5) * 8
-            );
-            this._timeSinceSignal = 0;
-        } else {
-            this._timeSinceSignal += dt;
-        }
 
-        if (this.state === 'SEARCH' && this._timeSinceSignal > ZOMBIE.searchTimeout) {
-            this.state = 'IDLE';
-        }
+            case 'ALERT': {
+                this.alertTimer -= dt;
+                this._alertPulse += dt * 6;
+                this.alertRing.material.opacity = 0.4 + Math.sin(this._alertPulse) * 0.3;
 
-        // --- Поведение ---
-        if (this.state === 'CHASE') {
-            this._moveTowards(playerPos.x, playerPos.z, dt, collision);
+                // Обновляем сигнал, если что-то видно
+                if (sees || hears) {
+                    this.alertSignal.set(playerPos.x, 0, playerPos.z);
+                }
+                this._facePoint(this.alertSignal.x, this.alertSignal.z, dt);
 
-            if (distToPlayer < ZOMBIE.attackRange && this.attackCooldown <= 0) {
-                this.attackCooldown = ZOMBIE.attackCooldown;
-                return ZOMBIE.attackDamage;
+                if (this.alertTimer <= 0) {
+                    this.alertRing.material.opacity = 0;
+                    if (sees) {
+                        this.state = 'CHASE';
+                        this.lastKnownPos.set(playerPos.x, 0, playerPos.z);
+                    } else if (hears || smells) {
+                        this._enterSearch(playerPos.x, playerPos.z);
+                    } else {
+                        this.state = 'IDLE';
+                    }
+                }
+                break;
             }
-        } else if (this.state === 'SEARCH') {
-            this._moveTowards(this.lastKnownPos.x, this.lastKnownPos.z, dt, collision);
-            const d = Math.hypot(
-                this.lastKnownPos.x - this.position.x,
-                this.lastKnownPos.z - this.position.z
-            );
-            if (d < ZOMBIE.arrivalDist) this.state = 'IDLE';
+
+            case 'SEARCH': {
+                this.searchTimer -= dt;
+                this._moveTowards(this.lastKnownPos.x, this.lastKnownPos.z, dt, collision);
+
+                const dToSearch = Math.hypot(
+                    this.lastKnownPos.x - this.position.x,
+                    this.lastKnownPos.z - this.position.z
+                );
+
+                if (sees) {
+                    this._enterAlert(playerPos.x, playerPos.z);
+                } else if (hears && this._hearingConfidence > ZOMBIE.chaseJumpConfidence) {
+                    this.state = 'CHASE';
+                    this.lastKnownPos.set(playerPos.x, 0, playerPos.z);
+                    this._timeSinceSignal = 0;
+                } else if (hears || smells) {
+                    this.lastKnownPos.set(playerPos.x, 0, playerPos.z);
+                    this.searchTimer = Math.max(this.searchTimer, 2);
+                }
+
+                if (dToSearch < ZOMBIE.arrivalDist || this.searchTimer <= 0) {
+                    this.state = 'IDLE';
+                }
+                break;
+            }
+
+            case 'CHASE': {
+                if (sees) {
+                    this.lastKnownPos.set(playerPos.x, 0, playerPos.z);
+                    this._timeSinceSignal = 0;
+                } else {
+                    this._timeSinceSignal += dt;
+                    if (this._timeSinceSignal > ZOMBIE.chaseLossTimeout) {
+                        this._enterSearch(playerPos.x, playerPos.z);
+                        break;
+                    }
+                }
+
+                this._moveTowards(this.lastKnownPos.x, this.lastKnownPos.z, dt, collision);
+
+                if (distToPlayer < ZOMBIE.attackRange && this.attackCooldown <= 0) {
+                    this.attackCooldown = ZOMBIE.attackCooldown;
+                    return ZOMBIE.attackDamage;
+                }
+                break;
+            }
         }
 
         return 0;
     }
 
-    // --- Движение с whiskers: если прямой шаг заблокирован, ---
-    // --- пробуем повернуть на ±60° и ±120° ---
     _moveTowards(tx, tz, dt, collision) {
         const dx = tx - this.position.x;
         const dz = tz - this.position.z;
@@ -189,7 +290,7 @@ export class Zombie {
 
         if (this._tryStep(ux, uz, dt, collision)) return;
 
-        for (const a of [1.05, -1.05, 2.09, -2.09]) {  // 60°, -60°, 120°, -120°
+        for (const a of [1.05, -1.05, 2.09, -2.09]) {
             const c = Math.cos(a), s = Math.sin(a);
             const rx = ux * c - uz * s;
             const rz = ux * s + uz * c;

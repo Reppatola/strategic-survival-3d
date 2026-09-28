@@ -202,7 +202,8 @@ export class Game {
         this.sensorVisualizer.update(
             this.spawner.zombies,
             this.noise,
-            this.player.position
+            this.player.position,
+            dt
         );
 
         // --- Камера ---
