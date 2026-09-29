@@ -1,5 +1,3 @@
-// Debug-визуализация сенсоров зомби: зрение, слух, нюх.
-// Включается клавишей V.
 import * as THREE from 'three';
 import { ZOMBIE } from '../config/zombie.config.js';
 
@@ -20,6 +18,7 @@ export class SensorVisualizer {
         this.group.visible = false;
         scene.add(this.group);
 
+        // Кольцо слуха игрока
         this.hearingRing = this._makeRing(1, COLOR_HEARING, 0.35, 0.5);
         this.group.add(this.hearingRing);
 
@@ -35,11 +34,7 @@ export class SensorVisualizer {
     _makeVisionCone(angleDeg, range) {
         const vAngle = angleDeg * Math.PI / 180;
         const vHalf = vAngle / 2;
-        const geo = new THREE.CircleGeometry(
-            range, 32,
-            -Math.PI / 2 - vHalf,
-            vAngle
-        );
+        const geo = new THREE.CircleGeometry(range, 32, -Math.PI / 2 - vHalf, vAngle);
         geo.rotateX(-Math.PI / 2);
 
         const mat = new THREE.MeshBasicMaterial({
@@ -73,11 +68,11 @@ export class SensorVisualizer {
         return mesh;
     }
 
-    update(zombies, noiseSystem, playerPos, dt) {
+    update(zombies, noiseSystem, playerPos, dt, smellTrail) {
         if (!this.enabled) return;
         this._pulse += (dt || 0.016) * 6;
 
-        // --- Круг слуха ---
+        // --- Кольцо слуха игрока ---
         const own = noiseSystem.ownTotal;
         let hearingRadius = 0;
         if (own > ZOMBIE.hearingThreshold) {
@@ -100,8 +95,10 @@ export class SensorVisualizer {
                 entry = {
                     vision: this._makeVisionCone(z.type.vision.angle, z.type.vision.range),
                     smell: null,
+                    hearing: this._makeRing(1, COLOR_HEARING, 0.2, 0.25),
                 };
-                this.group.add(entry.vision);
+                this.group.add(entry.vision, entry.hearing);
+
                 if (z.type.smell.range > 0) {
                     entry.smell = this._makeRing(z.type.smell.range, COLOR_SMELL, 0.25, 0.5);
                     this.group.add(entry.smell);
@@ -111,6 +108,7 @@ export class SensorVisualizer {
 
             const visible = z.alive;
             entry.vision.visible = visible;
+            entry.hearing.visible = visible;
             if (entry.smell) entry.smell.visible = visible;
             if (!visible) continue;
 
@@ -135,9 +133,31 @@ export class SensorVisualizer {
             entry.vision.position.set(z.position.x, 0.05, z.position.z);
             entry.vision.rotation.y = z.mesh.rotation.y;
 
+            // Радиус слуха зомби: где его порог слышимости достигается
+            // Формула: d = 10^((level - threshold) / 20)
+            const heard = z.lastHeardLevel;
+            if (heard > ZOMBIE.hearingThreshold) {
+                const r = Math.min(
+                    Math.pow(10, (heard - ZOMBIE.hearingThreshold) / 20),
+                    MAX_HEARING_RADIUS
+                );
+                entry.hearing.visible = true;
+                entry.hearing.position.set(z.position.x, 0.04, z.position.z);
+                entry.hearing.scale.setScalar(r);
+            } else {
+                entry.hearing.visible = false;
+            }
+
             if (entry.smell) {
                 entry.smell.position.set(z.position.x, 0.04, z.position.z);
             }
         }
+
+        // --- Шлейф запаха ---
+        smellTrail.setDebugVisible(true);
+    }
+
+    hideSmellTrail(smellTrail) {
+        smellTrail.setDebugVisible(false);
     }
 }

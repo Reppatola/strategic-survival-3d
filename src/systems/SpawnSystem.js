@@ -7,6 +7,7 @@ export class SpawnSystem {
         this.scene = scene;
         this.collision = collision;
         this.zombies = [];
+        this._nextId = 1;
     }
 
     spawnOne(x, z, typeKey) {
@@ -14,7 +15,8 @@ export class SpawnSystem {
         z = THREE.MathUtils.clamp(z, -GAME.worldHalf + 5, GAME.worldHalf - 5);
 
         if (this.collision.isBlocked(x, z)) return null;
-        const z0 = new Zombie(x, z, typeKey);
+        const id = 'z_' + (this._nextId++);
+        const z0 = new Zombie(x, z, typeKey, id);
         this.scene.add(z0.mesh);
         this.zombies.push(z0);
         return z0;
@@ -39,23 +41,19 @@ export class SpawnSystem {
         this.spawnRing(centerPos, 1, 60, 80, 'screamer');
     }
 
-    update(dt, playerPos, noiseSystem, playerDead, collision, bullets) {
-        // 1. Очистить прошлые источники шума зомби
+    update(dt, playerPos, noiseSystem, playerDead, collision, bullets, smellTrail) {
+        // 1. Очистить прошлые источники шума
         noiseSystem.clearZombieSources();
 
-        // 2. Зарегистрировать всех живых зомби как источники
-        for (let i = 0; i < this.zombies.length; i++) {
-            const z = this.zombies[i];
+        // 2. Собрать агрессивных
+        const aggressive = [];
+        for (const z of this.zombies) {
             if (!z.alive) continue;
-            noiseSystem.setZombieSource(
-                'z_' + i,
-                z.position.x,
-                z.position.z,
-                z.noiseLevel
-            );
+            if (z.state === 'CHASE') aggressive.push(z);
+            noiseSystem.setZombieSource(z.id, z.position.x, z.position.z, z.noiseLevel);
         }
 
-        // 3. Обновить AI (теперь они слышат друг друга)
+        // 3. Обновить AI
         let damageToPlayer = 0;
 
         for (const z of this.zombies) {
@@ -72,7 +70,7 @@ export class SpawnSystem {
                 }
             }
 
-            const dmg = z.update(dt, playerPos, noiseSystem, playerDead, collision);
+            const dmg = z.update(dt, playerPos, noiseSystem, playerDead, collision, aggressive, smellTrail);
             damageToPlayer += dmg;
         }
 

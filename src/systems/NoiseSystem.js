@@ -1,27 +1,18 @@
 // Система Шума — позиционная, физически честная.
-//
-// Источники шума:
-//   1. base — сам игрок (движение)
-//   2. impulses — разовые события (выстрел, удар)
-//   3. zombieSources — активные зомби (CHASE / SEARCH)
-//
-// Формула: LΣ = 10·log10( Σ 10^(Lᵢ(d)/10) ),  Lᵢ(d) = L₀ − 20·log10(d)
 import { NOISE } from '../config/noise.config.js';
 
 export class NoiseSystem {
     constructor() {
         this.base = 0;
         this.impulses = [];
-        this.zombieSources = new Map();   // id → { x, z, level }
+        this.zombieSources = new Map();
         this.ownTotal = 0;
         this.critical = false;
         this.criticalTime = 0;
         this.justEnteredCritical = false;
-
         this._playerPos = { x: 0, z: 0 };
     }
 
-    // --- Импульсы (выстрелы, удары) ---
     addImpulse(name, x = null, z = null, source = 'player') {
         const def = NOISE.impulses[name];
         if (!def) return;
@@ -33,8 +24,6 @@ export class NoiseSystem {
         });
     }
 
-    // --- Источники от зомби ---
-    // Вызывается каждый кадр для каждого живого зомби.
     setZombieSource(id, x, z, level) {
         if (level <= 0.5) {
             this.zombieSources.delete(id);
@@ -50,13 +39,17 @@ export class NoiseSystem {
     update(dt, playerState, playerPos) {
         if (playerPos) this._playerPos = playerPos;
 
-        // База от движения игрока
-        let target = 0;
-        if (playerState === 'CROUCH') target = NOISE.base.crouch;
-        else if (playerState === 'WALK') target = NOISE.base.walk;
-        else if (playerState === 'SPRINT') target = NOISE.base.sprint;
+        // --- База: мгновенный сброс при остановке ---
+        if (playerState === 'IDLE' || playerState === 'DEAD') {
+            this.base = 0;   // стоим → 0 dB сразу
+        } else {
+            let target = 0;
+            if (playerState === 'CROUCH') target = NOISE.base.crouch;
+            else if (playerState === 'WALK') target = NOISE.base.walk;
+            else if (playerState === 'SPRINT') target = NOISE.base.sprint;
 
-        this.base += (target - this.base) * Math.min(1, dt * NOISE.lerpSpeed);
+            this.base += (target - this.base) * Math.min(1, dt * NOISE.lerpSpeed);
+        }
 
         // Затухание импульсов
         for (let i = this.impulses.length - 1; i >= 0; i--) {
@@ -65,7 +58,7 @@ export class NoiseSystem {
             if (imp.level <= NOISE.silentThreshold) this.impulses.splice(i, 1);
         }
 
-        // ownTotal — только шум игрока (для HUD и критики)
+        // ownTotal — только шум игрока
         let ownEnergy = Math.pow(10, this.base / 10);
         for (const imp of this.impulses) {
             if (imp.source !== 'player') continue;
@@ -86,7 +79,6 @@ export class NoiseSystem {
         if (this.critical) this.criticalTime += dt;
     }
 
-    // Полный шум в точке (игрок + импульсы + зомби-источники)
     levelAtPoint(px, pz) {
         let energy = 0;
 
@@ -114,7 +106,6 @@ export class NoiseSystem {
         return Math.min(NOISE.max, 10 * Math.log10(energy));
     }
 
-    // Самый громкий источник в точке (px, pz) — куда идти зомби
     dominantSourceAt(px, pz) {
         let best = null;
         let bestLevel = 0;
@@ -151,7 +142,6 @@ export class NoiseSystem {
         return best;
     }
 
-    // Слышимый извне шум (без собственной базы) — для HUD
     ambientAtPlayer() {
         let energy = 0;
 
