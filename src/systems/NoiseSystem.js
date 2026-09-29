@@ -1,4 +1,11 @@
-// Система Шума — позиционная, физически честная.
+// Система Шума — позиционная.
+//
+// Зомби-источник несёт ДВЕ позиции:
+//   - x, z       — где находится сам зомби (для расчёта затухания)
+//   - targetX, targetZ — куда он идёт (позиция игрока, если CHASE)
+//
+// При запросе dominantSourceAt для зомби-источника возвращается ЦЕЛЬ,
+// а не сам зомби. Это устраняет зацикливание.
 import { NOISE } from '../config/noise.config.js';
 
 export class NoiseSystem {
@@ -24,12 +31,17 @@ export class NoiseSystem {
         });
     }
 
-    setZombieSource(id, x, z, level) {
+    // targetX, targetZ — куда идёт этот зомби (для CHASE — позиция игрока)
+    setZombieSource(id, x, z, level, targetX, targetZ) {
         if (level <= 0.5) {
             this.zombieSources.delete(id);
             return;
         }
-        this.zombieSources.set(id, { x, z, level });
+        this.zombieSources.set(id, {
+            x, z, level,
+            targetX: targetX !== undefined ? targetX : x,
+            targetZ: targetZ !== undefined ? targetZ : z,
+        });
     }
 
     clearZombieSources() {
@@ -39,9 +51,8 @@ export class NoiseSystem {
     update(dt, playerState, playerPos) {
         if (playerPos) this._playerPos = playerPos;
 
-        // --- База: мгновенный сброс при остановке ---
         if (playerState === 'IDLE' || playerState === 'DEAD') {
-            this.base = 0;   // стоим → 0 dB сразу
+            this.base = 0;
         } else {
             let target = 0;
             if (playerState === 'CROUCH') target = NOISE.base.crouch;
@@ -51,14 +62,12 @@ export class NoiseSystem {
             this.base += (target - this.base) * Math.min(1, dt * NOISE.lerpSpeed);
         }
 
-        // Затухание импульсов
         for (let i = this.impulses.length - 1; i >= 0; i--) {
             const imp = this.impulses[i];
             imp.level -= imp.decay * dt;
             if (imp.level <= NOISE.silentThreshold) this.impulses.splice(i, 1);
         }
 
-        // ownTotal — только шум игрока
         let ownEnergy = Math.pow(10, this.base / 10);
         for (const imp of this.impulses) {
             if (imp.source !== 'player') continue;
@@ -66,7 +75,6 @@ export class NoiseSystem {
         }
         this.ownTotal = Math.min(NOISE.max, 10 * Math.log10(ownEnergy));
 
-        // Гистерезис критики
         this.justEnteredCritical = false;
         if (!this.critical && this.ownTotal >= NOISE.criticalEnter) {
             this.critical = true;
@@ -106,6 +114,7 @@ export class NoiseSystem {
         return Math.min(NOISE.max, 10 * Math.log10(energy));
     }
 
+    // Для зомби-источника возвращает ЦЕЛЬ (targetX/targetZ), не позицию зомби.
     dominantSourceAt(px, pz) {
         let best = null;
         let bestLevel = 0;
@@ -135,7 +144,13 @@ export class NoiseSystem {
             const at = s.level - NOISE.distanceFalloff * Math.log10(d);
             if (at > bestLevel) {
                 bestLevel = at;
-                best = { x: s.x, z: s.z, level: at, kind: 'zombie' };
+                // ВАЖНО: возвращаем ЦЕЛЬ, а не позицию зомби
+                best = {
+                    x: s.targetX,
+                    z: s.targetZ,
+                    level: at,
+                    kind: 'zombie',
+                };
             }
         }
 

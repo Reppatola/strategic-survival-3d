@@ -41,19 +41,30 @@ export class SpawnSystem {
         this.spawnRing(centerPos, 1, 60, 80, 'screamer');
     }
 
-    update(dt, playerPos, noiseSystem, playerDead, collision, bullets, smellTrail) {
-        // 1. Очистить прошлые источники шума
-        noiseSystem.clearZombieSources();
+    countAlive() {
+        let n = 0;
+        for (const z of this.zombies) if (z.alive) n++;
+        return n;
+    }
 
-        // 2. Собрать агрессивных
-        const aggressive = [];
+    update(dt, playerPos, noiseSystem, playerDead, collision, bullets, smellTrail) {
+        // 1. Источники шума (зомби-транслятор цели)
+        noiseSystem.clearZombieSources();
         for (const z of this.zombies) {
             if (!z.alive) continue;
-            if (z.state === 'CHASE') aggressive.push(z);
-            noiseSystem.setZombieSource(z.id, z.position.x, z.position.z, z.noiseLevel);
+            const tx = z.state === 'CHASE' ? z.lastKnownPos.x : z.position.x;
+            const tz = z.state === 'CHASE' ? z.lastKnownPos.z : z.position.z;
+            noiseSystem.setZombieSource(z.id, z.position.x, z.position.z, z.noiseLevel, tx, tz);
         }
 
-        // 3. Обновить AI
+        // 2. Информанты — те, кто активно охотится
+        const informants = [];
+        for (const z of this.zombies) {
+            if (!z.alive) continue;
+            if (z.state === 'SEARCH' || z.state === 'CHASE') informants.push(z);
+        }
+
+        // 3. Обновление AI
         let damageToPlayer = 0;
 
         for (const z of this.zombies) {
@@ -70,17 +81,13 @@ export class SpawnSystem {
                 }
             }
 
-            const dmg = z.update(dt, playerPos, noiseSystem, playerDead, collision, aggressive, smellTrail);
+            const dmg = z.update(
+                dt, playerPos, noiseSystem, playerDead,
+                collision, smellTrail, informants
+            );
             damageToPlayer += dmg;
         }
 
         return damageToPlayer;
-    }
-
-    // Сколько зомби ещё живо (для проверки победы)
-    countAlive() {
-        let n = 0;
-        for (const z of this.zombies) if (z.alive) n++;
-        return n;
     }
 }
