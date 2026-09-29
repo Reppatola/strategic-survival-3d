@@ -13,4 +13,9 @@ export default {
     },
     alert: '⚠ ALARM ⚠',
     gameOver: 'DU BIST GESTORBEN',
+    gameOverSub: 'Du wurdest überwältigt',
+    victory: 'SIEG',
+    victorySub: 'Alle Zombies vernichtet',
+    restart: 'NEU STARTEN',
+    backToMenu: 'ZURÜCK ZUM MENÜ',
 };

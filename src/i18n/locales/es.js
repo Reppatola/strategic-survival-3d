@@ -13,4 +13,9 @@ export default {
     },
     alert: '⚠ ALERTA ⚠',
     gameOver: 'HAS MUERTO',
+    gameOverSub: 'Fuiste superado',
+    victory: 'VICTORIA',
+    victorySub: 'Todos los zombis eliminados',
+    restart: 'REINICIAR',
+    backToMenu: 'VOLVER AL MENÚ',
 };

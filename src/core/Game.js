@@ -23,10 +23,12 @@ import { DamageIndicator } from '../ui/DamageIndicator.js';
 import { SensorVisualizer } from '../debug/SensorVisualizer.js';
 
 export class Game {
-    constructor(container, { onPlayerDeath } = {}) {
+    constructor(container, { onPlayerDeath, onVictory } = {}) {
         this.container = container;
         this.onPlayerDeath = onPlayerDeath || null;
+        this.onVictory = onVictory || null;
         this._deathFired = false;
+        this._victoryFired = false;
 
         this.renderer = new Renderer(container);
 
@@ -49,6 +51,7 @@ export class Game {
         this._setupLights();
         this._setupGround();
 
+        // --- Системы ---
         this.input = new InputSystem();
         this.aim = new AimSystem(this.camera);
         this.collision = new CollisionSystem();
@@ -60,24 +63,30 @@ export class Game {
         window.addEventListener('pointerdown', unlockAudio, { once: true });
         window.addEventListener('keydown', unlockAudio, { once: true });
 
+        // --- Мир ---
         this.world = new World(this.scene, this.collision);
 
+        // --- Игрок ---
         this.player = new Player();
         this.scene.add(this.player.mesh);
 
+        // --- Визуал ---
         this.bullets = new BulletPool(this.scene);
         this.footprints = new FootprintPool(this.scene);
         this.noiseRing = new NoiseRing(this.scene);
         this.muzzleFlash = new MuzzleFlash(this.scene);
         this.smellTrail = new SmellTrail(this.scene);
 
+        // --- Враги ---
         this.spawner = new SpawnSystem(this.scene, this.collision);
         this.spawner.spawnMixed(this.player.position);
 
+        // --- UI ---
         this.hud = new HUD();
         this.crosshair = new Crosshair(this.scene);
         this.damageIndicator = new DamageIndicator();
 
+        // --- Debug ---
         this.sensorVisualizer = new SensorVisualizer(this.scene);
 
         this.loop = new Loop((dt, elapsed) => this._update(dt, elapsed));
@@ -121,9 +130,16 @@ export class Game {
     }
 
     _update(dt, elapsed) {
+        // --- Проверка смерти игрока ---
         if (this.player.dead && !this._deathFired) {
             this._deathFired = true;
-            if (this.onPlayerDead) this.onPlayerDead();
+            if (this.onPlayerDeath) this.onPlayerDeath();
+        }
+
+        // --- Проверка победы: игрок жив, зомби не осталось ---
+        if (!this._victoryFired && !this.player.dead && this.spawner.countAlive() === 0) {
+            this._victoryFired = true;
+            if (this.onVictory) this.onVictory();
         }
 
         const input = this.input.sample();
@@ -132,6 +148,7 @@ export class Game {
         const px = this.player.position.x;
         const pz = this.player.position.z;
 
+        // --- Debug: V ---
         if (input.pressedV) {
             this.sensorVisualizer.toggle();
             if (!this.sensorVisualizer.enabled) {
@@ -139,8 +156,10 @@ export class Game {
             }
         }
 
+        // --- Игрок ---
         this.player.update(dt, input, aimPoint, this.collision, this.smellTrail);
 
+        // --- Следы + звук шага ---
         if (this.player.didStep) {
             this.footprints.spawn(px, pz);
             const stepType = this.player.state === 'CROUCH' ? 'crouch'
@@ -149,6 +168,7 @@ export class Game {
             this.audio.playAt(`step_${stepType}`, px, pz, px, pz);
         }
 
+        // --- Стрельба ---
         if (this.player.didShoot) {
             this.bullets.spawn(px, pz, this.player._shotDir.dx, this.player._shotDir.dz);
             this.noise.addImpulse('shot', px, pz, 'player');
@@ -156,6 +176,7 @@ export class Game {
             this.audio.playAt('shot', px, pz, px, pz);
         }
 
+        // --- Одноразовые действия ---
         if (this.player.didMelee) this.noise.addImpulse('melee', px, pz, 'player');
         if (this.player.didGlass) this.noise.addImpulse('glass', px, pz, 'player');
         if (this.player.didBoom)  this.noise.addImpulse('boom',  px, pz, 'player');
@@ -164,8 +185,10 @@ export class Game {
         this.footprints.update(dt);
         this.muzzleFlash.update(dt);
 
+        // --- Шум ---
         this.noise.update(dt, this.player.state, this.player.position);
 
+        // --- Зомби ---
         const damageToPlayer = this.spawner.update(
             dt,
             this.player.position,
@@ -180,14 +203,17 @@ export class Game {
             this.damageIndicator.flash();
         }
 
+        // --- Озвучка криков ---
         for (const z of this.spawner.zombies) {
             if (z.alive && z.didScream) {
                 this.audio.playAt('scream', z.position.x, z.position.z, px, pz);
             }
         }
 
+        // --- Запах ---
         this.smellTrail.update(dt);
 
+        // --- Debug: сенсоры ---
         this.sensorVisualizer.update(
             this.spawner.zombies,
             this.noise,
@@ -196,14 +222,18 @@ export class Game {
             this.smellTrail
         );
 
+        // --- Камера ---
         this.cameraRig.update(dt, this.player.position, aimPoint);
 
+        // --- Солнце ---
         this.sun.position.set(px + 35, 55, pz + 20);
         this.sun.target.position.copy(this.player.position);
         this.sun.target.updateMatrixWorld();
 
+        // --- Кольцо шума ---
         this.noiseRing.update(this.player.position, this.noise.ownTotal, this.player.dead);
 
+        // --- UI ---
         this.crosshair.update(this.player.position, aimPoint, this.player.dead);
         this.damageIndicator.update(dt);
         this.hud.update(this.player, this.noise);

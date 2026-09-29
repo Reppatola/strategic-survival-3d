@@ -1,5 +1,3 @@
-// Английский — базовый язык и фолбэк.
-// Если в другом языке не хватает ключа — берём отсюда.
 export default {
     hud: {
         hp: 'HP',
@@ -15,4 +13,9 @@ export default {
     },
     alert: '⚠ ALERT ⚠',
     gameOver: 'YOU DIED',
+    gameOverSub: 'The zombies overwhelmed you',
+    victory: 'VICTORY',
+    victorySub: 'All zombies eliminated',
+    restart: 'RESTART',
+    backToMenu: 'BACK TO MENU',
 };

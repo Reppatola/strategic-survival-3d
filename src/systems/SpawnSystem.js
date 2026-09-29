@@ -76,4 +76,11 @@ export class SpawnSystem {
 
         return damageToPlayer;
     }
+
+    // Сколько зомби ещё живо (для проверки победы)
+    countAlive() {
+        let n = 0;
+        for (const z of this.zombies) if (z.alive) n++;
+        return n;
+    }
 }

@@ -1,47 +1,64 @@
 import { Game } from './core/Game.js';
 import { MainMenu } from './ui/MainMenu.js';
+import { GameOverOverlay } from './ui/GameOverOverlay.js';
 import { GAME } from './config/game.config.js';
 
 const container = document.getElementById('app');
+const AUTOSTART_KEY = 'ss_autostart';
 
 let game = null;
 let menu = null;
+let gameOver = null;
 
 function startGame() {
     if (!game) {
-        // Первый запуск: создаём Game и запоминаем ссылку для отладки
         game = new Game(container, {
             onPlayerDeath: () => {
-                // Через 1.5 сек показываем меню с подсвеченной кнопкой «Переиграть»
                 setTimeout(() => {
-                    if (!menu) return;
-                    menu.focusRestart();
-                    menu.show();
-                }, 1500);
+                    game.stop();
+                    gameOver.show({ win: false });
+                }, 1200);
+            },
+            onVictory: () => {
+                setTimeout(() => {
+                    game.stop();
+                    gameOver.show({ win: true });
+                }, 800);
             },
         });
         window.game = game;
     }
-    menu.unfocusRestart();
     menu.hide();
+    gameOver.hide();
     if (!game.isRunning()) game.start();
+}
+
+function restartGame() {
+    // Перезагрузка страницы + флаг автозапуска
+    localStorage.setItem(AUTOSTART_KEY, '1');
+    window.location.reload();
+}
+
+function backToMenu() {
+    localStorage.removeItem(AUTOSTART_KEY);
+    window.location.reload();
 }
 
 menu = new MainMenu({
     onPlay: startGame,
-
-    onRestart: () => {
-        // Простой и надёжный способ — перезагрузить страницу.
-        // После reload покажется меню, игрок нажмёт «Играть».
-        window.location.reload();
-    },
-
-    onExit: () => {
-        // Уходим в репозиторий. target=_blank, чтобы не потерять вкладку с игрой.
-        window.open(GAME.repoUrl, '_blank', 'noopener');
-        // Альтернатива — просто редирект: window.location.href = GAME.repoUrl;
-    },
+    onRestart: restartGame,
+    onExit: () => window.open(GAME.repoUrl, '_blank', 'noopener'),
 });
 
-// Показать меню при загрузке
-menu.show();
+gameOver = new GameOverOverlay({
+    onRestart: restartGame,
+    onMenu: backToMenu,
+});
+
+// Если в прошлой сессии нажали «Переиграть» — стартуем сразу
+if (localStorage.getItem(AUTOSTART_KEY) === '1') {
+    localStorage.removeItem(AUTOSTART_KEY);
+    startGame();
+} else {
+    menu.show();
+}

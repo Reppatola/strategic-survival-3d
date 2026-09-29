@@ -13,4 +13,9 @@ export default {
     },
     alert: '⚠ ТРЕВОГА ⚠',
     gameOver: 'ВЫ ПОГИБЛИ',
+    gameOverSub: 'Вас одолели зомби',
+    victory: 'ПОБЕДА',
+    victorySub: 'Все зомби уничтожены',
+    restart: 'ПЕРЕИГРАТЬ',
+    backToMenu: 'В МЕНЮ',
 };

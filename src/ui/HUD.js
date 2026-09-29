@@ -33,7 +33,6 @@ export class HUD {
             textShadow: '0 2px 8px rgba(0,0,0,.8)',
             pointerEvents: 'none', display: 'none',
         });
-        this.gameOverEl.textContent = t('gameOver');
         document.body.appendChild(this.gameOverEl);
     }
 
@@ -76,7 +75,5 @@ export class HUD {
         } else {
             this.criticalEl.style.display = 'none';
         }
-
-        this.gameOverEl.style.display = player.dead ? 'block' : 'none';
     }
 }

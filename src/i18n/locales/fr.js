@@ -13,4 +13,9 @@ export default {
     },
     alert: '⚠ ALERTE ⚠',
     gameOver: 'VOUS ÊTES MORT',
+    gameOverSub: 'Vous avez été submergé',
+    victory: 'VICTOIRE',
+    victorySub: 'Tous les zombies éliminés',
+    restart: 'REJOUER',
+    backToMenu: 'RETOUR AU MENU',
 };
