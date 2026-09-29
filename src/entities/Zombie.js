@@ -70,18 +70,40 @@ export class Zombie {
         this.mesh.add(body, head, this.alertRing);
     }
 
-    _senseHearing(dt, noiseSystem) {
-        const heard = noiseSystem.levelAtPoint(this.position.x, this.position.z);
-        this.lastHeardLevel = heard;
+    // ---------- СЕНСОРЫ ----------
 
-        if (heard > ZOMBIE.hearingThreshold) {
-            const rate = (heard - ZOMBIE.hearingThreshold) / 30
+    _senseHearing(dt, noiseSystem) {
+        const heardRaw = noiseSystem.levelAtPoint(this.position.x, this.position.z);
+
+        // Угол слуха: если источник сзади — штраф
+        let effectiveHeard = heardRaw;
+        if (heardRaw > 0.1) {
+            const dom = noiseSystem.dominantSourceAt(this.position.x, this.position.z);
+            if (dom) {
+                const dx = dom.x - this.position.x;
+                const dz = dom.z - this.position.z;
+                const dist = Math.hypot(dx, dz);
+                if (dist > 0.01) {
+                    const lookX = Math.sin(this.mesh.rotation.y);
+                    const lookZ = Math.cos(this.mesh.rotation.y);
+                    const dot = (lookX * dx + lookZ * dz) / dist;
+                    const angle = Math.acos(THREE.MathUtils.clamp(dot, -1, 1)) * 180 / Math.PI;
+                    if (angle > this.type.hearing.angle / 2) {
+                        effectiveHeard -= ZOMBIE.rearHearingPenalty;
+                    }
+                }
+                this.lastHeardPos.set(dom.x, 0, dom.z);
+            }
+        }
+        this.lastHeardLevel = effectiveHeard;
+
+        const threshold = this.type.hearing.threshold;
+
+        if (effectiveHeard > threshold) {
+            const rate = (effectiveHeard - threshold) / 30
                        * this.type.hearing.sensitivity
                        * ZOMBIE.confidenceGain;
             this._hearingConfidence += rate * dt;
-
-            const dom = noiseSystem.dominantSourceAt(this.position.x, this.position.z);
-            if (dom) this.lastHeardPos.set(dom.x, 0, dom.z);
         } else {
             this._hearingConfidence -= ZOMBIE.confidenceDecay * dt;
         }
@@ -89,14 +111,12 @@ export class Zombie {
         return this._hearingConfidence >= ZOMBIE.confidenceTrigger;
     }
 
-    // Зрение: видит игрока или агрессивного зомби
+    // Возвращает { kind: 'player' | 'zombie', x, z } или null
     _senseVision(playerPos, collision, aggressiveZombies) {
-        // 1. Игрок
         if (this._canSee(playerPos.x, playerPos.z, collision, this.type.vision.range)) {
             return { kind: 'player', x: playerPos.x, z: playerPos.z };
         }
 
-        // 2. Агрессивный зомби
         if (aggressiveZombies) {
             for (const az of aggressiveZombies) {
                 if (az === this) continue;
@@ -126,31 +146,42 @@ export class Zombie {
         return true;
     }
 
-    // Запах: идёт по шлейфу игрока
-    _senseSmell(smellTrail) {
+    // Запах: большой радиус = шлейф, малый = позиция игрока
+    _senseSmell(playerPos, smellTrail) {
         const s = this.type.smell;
         if (s.range <= 0) return null;
 
-        const point = smellTrail.findNearest(this.position.x, this.position.z, 'player', s.range);
-        if (!point) return null;
+        if (s.range > 15) {
+            // Sniffer — идёт по шлейфу
+            const point = smellTrail.findNearest(this.position.x, this.position.z, 'player', s.range);
+            if (!point) return null;
 
-        // Направленный нюх (у sniffer угол 90°)
-        if (s.angle < 180) {
-            const dx = point.x - this.position.x;
-            const dz = point.z - this.position.z;
-            const dist = Math.hypot(dx, dz);
-            if (dist > 0.01) {
-                const lookX = Math.sin(this.mesh.rotation.y);
-                const lookZ = Math.cos(this.mesh.rotation.y);
-                const dot = (lookX * dx + lookZ * dz) / dist;
-                const angle = Math.acos(THREE.MathUtils.clamp(dot, -1, 1)) * 180 / Math.PI;
-                if (angle > s.angle / 2) return null;
+            if (s.angle < 360) {
+                const dx = point.x - this.position.x;
+                const dz = point.z - this.position.z;
+                const dist = Math.hypot(dx, dz);
+                if (dist > 0.01) {
+                    const lookX = Math.sin(this.mesh.rotation.y);
+                    const lookZ = Math.cos(this.mesh.rotation.y);
+                    const dot = (lookX * dx + lookZ * dz) / dist;
+                    const angle = Math.acos(THREE.MathUtils.clamp(dot, -1, 1)) * 180 / Math.PI;
+                    if (angle > s.angle / 2) return null;
+                }
             }
+            return { x: point.x, z: point.z };
         }
 
-        return point;
+        // Малый радиус — проверка позиции игрока
+        const dx = playerPos.x - this.position.x;
+        const dz = playerPos.z - this.position.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > s.range) return null;
+        return { x: playerPos.x, z: playerPos.z };
     }
 
+    // ---------- КРИК ----------
+
+    // Кричит ТОЛЬКО при виде игрока (source === 'vision')
     _tryScream(noiseSystem) {
         if (!this.type.scream) return;
         if (this._screamCooldown > 0) return;
@@ -160,7 +191,10 @@ export class Zombie {
         noiseSystem.addImpulse('scream', this.position.x, this.position.z, 'world');
     }
 
-    _enterAlert(targetX, targetZ, noiseSystem) {
+    // ---------- ПЕРЕХОДЫ ----------
+
+    // source: 'vision' | 'vision_zombie' | 'hearing' | 'smell'
+    _enterAlert(targetX, targetZ, noiseSystem, source) {
         const confidence = Math.max(this._hearingConfidence, this._visionConfidence);
         const bonus = ZOMBIE.confidenceAlertBonus * confidence;
         const penalty = this.type.alert.silencePenalty;
@@ -170,7 +204,10 @@ export class Zombie {
         this.state = 'ALERT';
         this._alertPulse = 0;
 
-        this._tryScream(noiseSystem);
+        // Крикун кричит ТОЛЬКО когда сам увидел ИГРОКА
+        if (source === 'vision') {
+            this._tryScream(noiseSystem);
+        }
     }
 
     _enterSearch(targetX, targetZ) {
@@ -196,6 +233,8 @@ export class Zombie {
         this.mesh.rotation.y += d * Math.min(1, dt * rate);
     }
 
+    // ---------- ОБНОВЛЕНИЕ ----------
+
     update(dt, playerPos, noiseSystem, playerDead, collision, aggressiveZombies, smellTrail) {
         if (!this.alive) return 0;
 
@@ -216,7 +255,6 @@ export class Zombie {
         );
         const nearPlayer = distToPlayer < ZOMBIE.attackRange * 1.5;
 
-        // --- Сенсоры ---
         const vision = this._senseVision(playerPos, collision, aggressiveZombies);
         const seesPlayer = vision && vision.kind === 'player';
         const seesAggressiveZombie = vision && vision.kind === 'zombie';
@@ -227,19 +265,18 @@ export class Zombie {
         );
 
         const hears = this._senseHearing(dt, noiseSystem);
-        const smell = this._senseSmell(smellTrail);
+        const smell = this._senseSmell(playerPos, smellTrail);
 
-        // --- State machine ---
         switch (this.state) {
             case 'IDLE': {
                 if (seesPlayer) {
-                    this._enterAlert(playerPos.x, playerPos.z, noiseSystem);
+                    this._enterAlert(playerPos.x, playerPos.z, noiseSystem, 'vision');
                 } else if (seesAggressiveZombie) {
-                    this._enterAlert(vision.x, vision.z, noiseSystem);
+                    this._enterAlert(vision.x, vision.z, noiseSystem, 'vision_zombie');
                 } else if (hears) {
-                    this._enterAlert(this.lastHeardPos.x, this.lastHeardPos.z, noiseSystem);
+                    this._enterAlert(this.lastHeardPos.x, this.lastHeardPos.z, noiseSystem, 'hearing');
                 } else if (smell) {
-                    this._enterAlert(smell.x, smell.z, noiseSystem);
+                    this._enterAlert(smell.x, smell.z, noiseSystem, 'smell');
                 }
                 break;
             }
@@ -283,7 +320,7 @@ export class Zombie {
                 );
 
                 if (seesPlayer || nearPlayer) {
-                    this._enterAlert(playerPos.x, playerPos.z, noiseSystem);
+                    this._enterAlert(playerPos.x, playerPos.z, noiseSystem, 'vision');
                 } else if (hears && this._hearingConfidence > ZOMBIE.chaseJumpConfidence) {
                     this.state = 'CHASE';
                     this.lastKnownPos.set(this.lastHeardPos.x, 0, this.lastHeardPos.z);
@@ -319,7 +356,8 @@ export class Zombie {
                     }
                 }
 
-                if (seesPlayer || hears) this._tryScream(noiseSystem);
+                // Крикун в CHASE кричит ТОЛЬКО пока видит игрока
+                if (seesPlayer) this._tryScream(noiseSystem);
 
                 this._moveTowards(this.lastKnownPos.x, this.lastKnownPos.z, dt, collision);
 
@@ -331,7 +369,7 @@ export class Zombie {
             }
         }
 
-        // --- Шум: только если реально сдвинулся в этом кадре ---
+        // Шум от фактического движения
         const moved = Math.hypot(
             this.position.x - this._prevX,
             this.position.z - this._prevZ
@@ -349,7 +387,6 @@ export class Zombie {
             this.noiseLevel = 0;
         }
 
-        // --- Запах: эмитим в шлейф, если двигаемся ---
         smellTrail.tickEmitter(this.id, 'zombie', this.position.x, this.position.z, moved > 0.001, dt);
 
         return 0;
@@ -374,8 +411,13 @@ export class Zombie {
     }
 
     _tryStep(ux, uz, dt, collision) {
-        const nx = this.position.x + ux * this.type.speed * dt;
-        const nz = this.position.z + uz * this.type.speed * dt;
+        // Слухач медленный пока не увидит цель
+        const speed = (this.state === 'CHASE' && this.type.chaseSpeed)
+            ? this.type.chaseSpeed
+            : this.type.speed;
+
+        const nx = this.position.x + ux * speed * dt;
+        const nz = this.position.z + uz * speed * dt;
         const moved = collision.move(this.position, nx, nz);
         if (moved) this.mesh.rotation.y = Math.atan2(ux, uz);
         return moved;
