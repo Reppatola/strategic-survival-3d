@@ -1,11 +1,14 @@
 import * as THREE from 'three';
 import { ZOMBIE } from '../config/zombie.config.js';
+import { PLAYER } from '../config/player.config.js';
 
 const COLOR_VISION_IDLE  = 0xffcc00;
 const COLOR_VISION_ALERT = 0xffee44;
 const COLOR_VISION_CHASE = 0xff4444;
 const COLOR_SMELL        = 0xcc66ff;
 const COLOR_HEARING      = 0xff8833;
+const COLOR_PLAYER_VISION = 0x88ccff;   // голубой — маркер игрока
+const COLOR_PLAYER_HEARING = 0x66aaff;
 
 const MAX_HEARING_RADIUS = 200;
 
@@ -18,9 +21,17 @@ export class SensorVisualizer {
         this.group.visible = false;
         scene.add(this.group);
 
-        this.hearingRing = this._makeRing(1, COLOR_HEARING, 0.35, 0.5);
-        this.group.add(this.hearingRing);
+        // --- Сенсоры игрока ---
+        this.playerVision = this._makeArc(
+            PLAYER.vision.angle,
+            PLAYER.vision.range,
+            COLOR_PLAYER_VISION,
+            0.35
+        );
+        this.playerHearing = this._makeRing(1, COLOR_PLAYER_HEARING, 0.35, 0.5);
+        this.group.add(this.playerVision, this.playerHearing);
 
+        // --- По зомби ---
         this.byZombie = new Map();
         this._pulse = 0;
     }
@@ -30,7 +41,6 @@ export class SensorVisualizer {
         this.group.visible = this.enabled;
     }
 
-    // Сектор: дуга от -angle/2 до +angle/2 от направления взгляда
     _makeArc(angleDeg, range, color, opacity = 0.12) {
         const vAngle = angleDeg * Math.PI / 180;
         const vHalf = vAngle / 2;
@@ -65,9 +75,18 @@ export class SensorVisualizer {
         return mesh;
     }
 
-    update(zombies, noiseSystem, playerPos, dt, smellTrail) {
+    // player — объект Player (нужны position и mesh.rotation.y)
+    update(player, zombies, noiseSystem, dt, smellTrail) {
         if (!this.enabled) return;
         this._pulse += (dt || 0.016) * 6;
+
+        const playerPos = player.position;
+        const playerRotY = player.mesh.rotation.y;
+
+        // --- Конус зрения игрока ---
+        this.playerVision.position.set(playerPos.x, 0.05, playerPos.z);
+        this.playerVision.rotation.y = playerRotY;
+        this.playerVision.visible = !player.dead;
 
         // --- Кольцо слуха игрока ---
         const own = noiseSystem.ownTotal;
@@ -77,22 +96,22 @@ export class SensorVisualizer {
             hearingRadius = Math.pow(10, (own - playerThreshold) / 20);
             hearingRadius = Math.min(hearingRadius, MAX_HEARING_RADIUS);
         }
-        if (hearingRadius > 0.5) {
-            this.hearingRing.visible = true;
-            this.hearingRing.position.set(playerPos.x, 0.04, playerPos.z);
-            this.hearingRing.scale.setScalar(hearingRadius);
+        if (hearingRadius > 0.5 && !player.dead) {
+            this.playerHearing.visible = true;
+            this.playerHearing.position.set(playerPos.x, 0.04, playerPos.z);
+            this.playerHearing.scale.setScalar(hearingRadius);
         } else {
-            this.hearingRing.visible = false;
+            this.playerHearing.visible = false;
         }
 
-        // --- Каждый зомби ---
+        // --- Зомби ---
         for (const z of zombies) {
             let entry = this.byZombie.get(z);
             if (!entry) {
                 entry = {
-                    vision:   this._makeArc(z.type.vision.angle,  z.type.vision.range,  COLOR_VISION_IDLE),
-                    hearing:  this._makeArc(z.type.hearing.angle, MAX_HEARING_RADIUS * 0.5, COLOR_HEARING, 0.08),
-                    smell:    null,
+                    vision:    this._makeArc(z.type.vision.angle,  z.type.vision.range,  COLOR_VISION_IDLE),
+                    hearing:   this._makeArc(z.type.hearing.angle, MAX_HEARING_RADIUS * 0.5, COLOR_HEARING, 0.08),
+                    smell:     null,
                     smallSmell: null,
                 };
                 this.group.add(entry.vision, entry.hearing);
@@ -115,7 +134,6 @@ export class SensorVisualizer {
             if (entry.smallSmell) entry.smallSmell.visible = visible;
             if (!visible) continue;
 
-            // Цвет зрения по состоянию
             let visionColor = COLOR_VISION_IDLE;
             let visionOpacity = 0.15;
             if (z.state === 'CHASE') {

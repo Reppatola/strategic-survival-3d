@@ -215,9 +215,9 @@ export class Game {
 
         // --- Debug: сенсоры ---
         this.sensorVisualizer.update(
+            this.player,              // ← объект целиком, не position
             this.spawner.zombies,
             this.noise,
-            this.player.position,
             dt,
             this.smellTrail
         );
