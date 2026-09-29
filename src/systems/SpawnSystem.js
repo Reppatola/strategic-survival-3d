@@ -1,5 +1,3 @@
-// Спавнит зомби разных типов, обновляет их, возвращает урон игроку.
-// Крикун сам добавляет импульс 'scream' со своей позиции (см. Zombie.update).
 import * as THREE from 'three';
 import { Zombie } from '../entities/Zombie.js';
 import { GAME } from '../config/game.config.js';
@@ -12,7 +10,6 @@ export class SpawnSystem {
     }
 
     spawnOne(x, z, typeKey) {
-        // Клампим к границам мира
         x = THREE.MathUtils.clamp(x, -GAME.worldHalf + 5, GAME.worldHalf - 5);
         z = THREE.MathUtils.clamp(z, -GAME.worldHalf + 5, GAME.worldHalf - 5);
 
@@ -43,12 +40,27 @@ export class SpawnSystem {
     }
 
     update(dt, playerPos, noiseSystem, playerDead, collision, bullets) {
+        // 1. Очистить прошлые источники шума зомби
+        noiseSystem.clearZombieSources();
+
+        // 2. Зарегистрировать всех живых зомби как источники
+        for (let i = 0; i < this.zombies.length; i++) {
+            const z = this.zombies[i];
+            if (!z.alive) continue;
+            noiseSystem.setZombieSource(
+                'z_' + i,
+                z.position.x,
+                z.position.z,
+                z.noiseLevel
+            );
+        }
+
+        // 3. Обновить AI (теперь они слышат друг друга)
         let damageToPlayer = 0;
 
         for (const z of this.zombies) {
             if (!z.alive) continue;
 
-            // Попадание пули
             for (const b of bullets.items) {
                 if (!b.mesh.visible) continue;
                 const dx = b.mesh.position.x - z.position.x;

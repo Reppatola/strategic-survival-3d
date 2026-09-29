@@ -1,13 +1,6 @@
-// Зомби с системой восприятия: слух + зрение + нюх.
-// Состояния: IDLE → ALERT → CHASE → SEARCH → IDLE.
-//
-// ALERT — «замер и поворот к сигналу». Даёт игроку окно среагировать.
-// Длительность = base × (1 − confidence_bonus) × silence_penalty.
-//
-// Крикун: кричит при входе в ALERT и повторно в CHASE, пока видит/слышит игрока.
-// Крик добавляет world-импульс 'scream' (120 dB) — зомби слышат его и идут.
 import * as THREE from 'three';
 import { ZOMBIE_TYPES, ZOMBIE } from '../config/zombie.config.js';
+import { NOISE } from '../config/noise.config.js';
 
 export class Zombie {
     constructor(x, z, typeKey = 'walker') {
@@ -22,9 +15,9 @@ export class Zombie {
         this.hp = this.type.hp;
         this.attackCooldown = 0;
 
-        // AI
         this.state = 'IDLE';
         this.lastKnownPos = new THREE.Vector3(x, 0, z);
+        this.lastHeardPos = new THREE.Vector3(x, 0, z);
         this.alertSignal = new THREE.Vector3(x, 0, z);
 
         this.alertTimer = 0;
@@ -38,6 +31,9 @@ export class Zombie {
 
         this.didScream = false;
         this.lastHeardLevel = 0;
+
+        // Уровень шума, который издаёт сам зомби
+        this.noiseLevel = 0;
 
         this._buildModel();
     }
@@ -72,8 +68,6 @@ export class Zombie {
         this.mesh.add(body, head, this.alertRing);
     }
 
-    // ---------- СЕНСОРЫ ----------
-
     _senseHearing(dt, noiseSystem) {
         const heard = noiseSystem.levelAtPoint(this.position.x, this.position.z);
         this.lastHeardLevel = heard;
@@ -83,6 +77,10 @@ export class Zombie {
                        * this.type.hearing.sensitivity
                        * ZOMBIE.confidenceGain;
             this._hearingConfidence += rate * dt;
+
+            // Запоминаем, откуда именно звук
+            const dom = noiseSystem.dominantSourceAt(this.position.x, this.position.z);
+            if (dom) this.lastHeardPos.set(dom.x, 0, dom.z);
         } else {
             this._hearingConfidence -= ZOMBIE.confidenceDecay * dt;
         }
@@ -125,10 +123,6 @@ export class Zombie {
         return angle <= s.angle / 2;
     }
 
-    // ---------- КРИК ----------
-
-    // Крикун кричит: добавляет world-импульс в noiseSystem + флаг для Game.
-    // Может вызываться и из _enterAlert, и из CHASE.
     _tryScream(noiseSystem) {
         if (!this.type.scream) return;
         if (this._screamCooldown > 0) return;
@@ -137,8 +131,6 @@ export class Zombie {
         this.didScream = true;
         noiseSystem.addImpulse('scream', this.position.x, this.position.z, 'world');
     }
-
-    // ---------- ПЕРЕХОДЫ ----------
 
     _enterAlert(targetX, targetZ, noiseSystem) {
         const confidence = Math.max(this._hearingConfidence, this._visionConfidence);
@@ -150,7 +142,6 @@ export class Zombie {
         this.state = 'ALERT';
         this._alertPulse = 0;
 
-        // Крикун кричит в начале ALERT — окно среагировать = длительность крика
         this._tryScream(noiseSystem);
     }
 
@@ -177,8 +168,6 @@ export class Zombie {
         this.mesh.rotation.y += d * Math.min(1, dt * rate);
     }
 
-    // ---------- ОБНОВЛЕНИЕ ----------
-
     update(dt, playerPos, noiseSystem, playerDead, collision) {
         if (!this.alive) return 0;
 
@@ -189,6 +178,7 @@ export class Zombie {
         if (playerDead) {
             this.state = 'IDLE';
             this.alertRing.material.opacity = 0;
+            this.noiseLevel = 0;
             return 0;
         }
 
@@ -196,10 +186,8 @@ export class Zombie {
             playerPos.x - this.position.x,
             playerPos.z - this.position.z
         );
-
         const nearPlayer = distToPlayer < ZOMBIE.attackRange * 1.5;
 
-        // --- Сенсоры ---
         const sees = this._senseVision(playerPos, collision);
         this._visionConfidence = THREE.MathUtils.clamp(
             this._visionConfidence + (sees ? dt * 1.5 : -ZOMBIE.confidenceDecay * dt),
@@ -208,10 +196,14 @@ export class Zombie {
         const hears = this._senseHearing(dt, noiseSystem);
         const smells = this._senseSmell(playerPos);
 
-        // --- State machine ---
         switch (this.state) {
             case 'IDLE': {
-                if (sees || hears || smells) {
+                if (sees) {
+                    this._enterAlert(playerPos.x, playerPos.z, noiseSystem);
+                } else if (hears) {
+                    // Идём к источнику шума (игрок ИЛИ другой зомби)
+                    this._enterAlert(this.lastHeardPos.x, this.lastHeardPos.z, noiseSystem);
+                } else if (smells) {
                     this._enterAlert(playerPos.x, playerPos.z, noiseSystem);
                 }
                 break;
@@ -222,9 +214,9 @@ export class Zombie {
                 this._alertPulse += dt * 6;
                 this.alertRing.material.opacity = 0.4 + Math.sin(this._alertPulse) * 0.3;
 
-                if (sees || hears) {
-                    this.alertSignal.set(playerPos.x, 0, playerPos.z);
-                }
+                if (sees) this.alertSignal.set(playerPos.x, 0, playerPos.z);
+                else if (hears) this.alertSignal.set(this.lastHeardPos.x, 0, this.lastHeardPos.z);
+
                 this._facePoint(this.alertSignal.x, this.alertSignal.z, dt);
 
                 if (this.alertTimer <= 0) {
@@ -232,7 +224,9 @@ export class Zombie {
                     if (sees) {
                         this.state = 'CHASE';
                         this.lastKnownPos.set(playerPos.x, 0, playerPos.z);
-                    } else if (hears || smells) {
+                    } else if (hears) {
+                        this._enterSearch(this.lastHeardPos.x, this.lastHeardPos.z);
+                    } else if (smells) {
                         this._enterSearch(playerPos.x, playerPos.z);
                     } else {
                         this.state = 'IDLE';
@@ -254,9 +248,12 @@ export class Zombie {
                     this._enterAlert(playerPos.x, playerPos.z, noiseSystem);
                 } else if (hears && this._hearingConfidence > ZOMBIE.chaseJumpConfidence) {
                     this.state = 'CHASE';
-                    this.lastKnownPos.set(playerPos.x, 0, playerPos.z);
+                    this.lastKnownPos.set(this.lastHeardPos.x, 0, this.lastHeardPos.z);
                     this._timeSinceSignal = 0;
-                } else if (hears || smells) {
+                } else if (hears) {
+                    this.lastKnownPos.set(this.lastHeardPos.x, 0, this.lastHeardPos.z);
+                    this.searchTimer = Math.max(this.searchTimer, 2);
+                } else if (smells) {
                     this.lastKnownPos.set(playerPos.x, 0, playerPos.z);
                     this.searchTimer = Math.max(this.searchTimer, 2);
                 }
@@ -273,7 +270,6 @@ export class Zombie {
                 if (seesOrNear) {
                     this.lastKnownPos.set(playerPos.x, 0, playerPos.z);
                     this._timeSinceSignal = 0;
-
                     if (nearPlayer && !sees) {
                         this._facePoint(playerPos.x, playerPos.z, dt, 10);
                     }
@@ -285,10 +281,7 @@ export class Zombie {
                     }
                 }
 
-                // --- Крикун кричит повторно, пока видит/слышит игрока ---
-                if (sees || hears) {
-                    this._tryScream(noiseSystem);
-                }
+                if (sees || hears) this._tryScream(noiseSystem);
 
                 this._moveTowards(this.lastKnownPos.x, this.lastKnownPos.z, dt, collision);
 
@@ -299,6 +292,9 @@ export class Zombie {
                 break;
             }
         }
+
+        // Обновляем свой уровень шума по состоянию
+        this.noiseLevel = NOISE.zombieNoise[this.state] || 0;
 
         return 0;
     }
@@ -332,5 +328,6 @@ export class Zombie {
     die() {
         this.alive = false;
         this.mesh.visible = false;
+        this.noiseLevel = 0;
     }
 }
